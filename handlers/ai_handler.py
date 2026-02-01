@@ -9,13 +9,14 @@ import io
 import time
 from PIL import Image
 from config import (
-    HF_TOKEN, HF_API_URL, REQUEST_TIMEOUT, 
-    IMAGE_MAX_WIDTH, IMAGE_JPEG_QUALITY, SEARCH_OBJECTS
+    OPENROUTER_API_KEY, OPENROUTER_API_URL, OPENROUTER_MODEL,
+    OPENROUTER_SITE_URL, OPENROUTER_SITE_NAME,
+    REQUEST_TIMEOUT, IMAGE_MAX_WIDTH, IMAGE_JPEG_QUALITY, SEARCH_OBJECTS
 )
 
 
 class AIHandler:
-    """Handler for AI image analysis using Hugging Face Inference API with Pi Zero optimizations."""
+    """Handler for AI image analysis using OpenRouter API with Pi Zero optimizations."""
     
     def __init__(self, retry_attempts=2, retry_delay=2.0):
         """
@@ -25,14 +26,19 @@ class AIHandler:
             retry_attempts: Number of retry attempts for failed API calls
             retry_delay: Delay between retries in seconds
         """
-        if not HF_TOKEN:
-            raise RuntimeError("HF_TOKEN is missing in environment variables.")
+        if not OPENROUTER_API_KEY:
+            raise RuntimeError("OPENROUTER_API_KEY is missing in environment variables.")
         
         self.headers = {
-            "Authorization": f"Bearer {HF_TOKEN}",
-            "Content-Type": "application/json",
-            "Accept": "application/json"
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json"
         }
+        
+        # Add optional site tracking headers for OpenRouter rankings
+        if OPENROUTER_SITE_URL:
+            self.headers["HTTP-Referer"] = OPENROUTER_SITE_URL
+        if OPENROUTER_SITE_NAME:
+            self.headers["X-Title"] = OPENROUTER_SITE_NAME
         self.retry_attempts = retry_attempts
         self.retry_delay = retry_delay
         self.last_successful_response = None  # Cache for fallback
@@ -117,21 +123,33 @@ class AIHandler:
                 f"Is '{query}' in this image:"
             )
         
-        # Molmo specific structure with reduced max_new_tokens
+        # OpenRouter chat completions format with image_url
         return {
-            "inputs": {
-                "image": data_url,
-                "text": prompt
-            },
-            "parameters": {
-                "max_new_tokens": 150,  # Reduced from 200 for faster response
-                "temperature": 0.7
-            }
+            "model": OPENROUTER_MODEL,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": prompt
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": data_url
+                            }
+                        }
+                    ]
+                }
+            ],
+            "max_tokens": 150,
+            "temperature": 0.7
         }
 
     def analyze_image(self, image_bytes: bytes, mode: str = 'describe', query: str = None, progress_callback=None) -> str:
         """
-        Sends image to Hugging Face Inference API and returns the generated text.
+        Sends image to OpenRouter API and returns the generated text.
         
         Args:
             image_bytes: Raw image bytes
@@ -151,7 +169,7 @@ class AIHandler:
                     progress_callback(f"Retry attempt {attempt}")
                 
                 response = requests.post(
-                    HF_API_URL,
+                    OPENROUTER_API_URL,
                     headers=self.headers,
                     json=payload,
                     timeout=REQUEST_TIMEOUT
@@ -166,20 +184,18 @@ class AIHandler:
                 response.raise_for_status()
                 result = response.json()
                 
-                # Parse Response
+                # Parse OpenRouter Response
                 generated_text = None
                 
-                # Format 1: [{"generated_text": "..."}]
-                if isinstance(result, list) and len(result) > 0 and "generated_text" in result[0]:
-                    generated_text = result[0]["generated_text"]
-                # Format 2: {"generated_text": "..."}
-                elif isinstance(result, dict) and "generated_text" in result:
-                    generated_text = result["generated_text"]
-                # Format 3: Error message
+                # OpenRouter format: {"choices": [{"message": {"content": "..."}}]}
+                if isinstance(result, dict) and "choices" in result:
+                    if len(result["choices"]) > 0 and "message" in result["choices"][0]:
+                        generated_text = result["choices"][0]["message"].get("content", "")
+                # Error message format
                 elif isinstance(result, dict) and "error" in result:
-                    error_msg = result.get("error", "Unknown error")
+                    error_msg = result.get("error", {}).get("message", "Unknown error")
                     print(f"API error response: {error_msg}")
-                    if "loading" in error_msg.lower():
+                    if "loading" in error_msg.lower() or "warming up" in error_msg.lower():
                         print("Model is loading, will retry...")
                         time.sleep(self.retry_delay * 3)
                         continue

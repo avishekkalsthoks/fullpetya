@@ -7,10 +7,14 @@ load_dotenv()
 # API Configuration
 # ===============================================
 
-# Hugging Face Configuration (for Describe, OCR, and Search modes)
-HF_TOKEN = os.getenv('HF_TOKEN', '').strip()
-HF_MODEL = os.getenv('HF_MODEL', 'allenai/Molmo2-8B:publicai')
-HF_API_URL = f"https://api-inference.huggingface.co/models/{HF_MODEL}"
+# OpenRouter Configuration (for Describe, OCR, and Search modes)
+OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY', '').strip()
+OPENROUTER_MODEL = os.getenv('OPENROUTER_MODEL', 'allenai/molmo-2-8b:free')
+OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# Optional: Site URL and name for rankings on openrouter.ai
+OPENROUTER_SITE_URL = os.getenv('OPENROUTER_SITE_URL', '').strip()
+OPENROUTER_SITE_NAME = os.getenv('OPENROUTER_SITE_NAME', 'Smart Vision Guide').strip()
 
 # ===============================================
 # Local Face Recognition Configuration
@@ -126,7 +130,8 @@ ENABLE_SEARCH_MODE = True
 def get_system_info():
     """Get system information for debugging."""
     info = {
-        'hf_configured': bool(HF_TOKEN),
+        'openrouter_configured': bool(OPENROUTER_API_KEY),
+        'openrouter_model': OPENROUTER_MODEL,
         'face_recognition': 'Local (dlib)',
         'camera_resolution': f"{CAMERA_WIDTH}x{CAMERA_HEIGHT}",
         'image_max_width': IMAGE_MAX_WIDTH,
@@ -145,7 +150,8 @@ if __name__ == '__main__':
     info = get_system_info()
     
     print(f"\n🔧 API Configuration:")
-    print(f"  Hugging Face: {'✓ Configured' if info['hf_configured'] else '✗ Not configured'}")
+    print(f"  OpenRouter: {'✓ Configured' if info['openrouter_configured'] else '✗ Not configured'}")
+    print(f"  Model:      {info['openrouter_model']}")
     print(f"  Face Recognition: {info['face_recognition']}")
     
     print(f"\n📷 Camera Settings:")
