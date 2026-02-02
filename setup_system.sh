@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Smart Vision Guide - Raspberry Pi Zero 2W Optimized Setup Script
-# Enhanced to ensure all dependencies are installed and handle potential issues.
+# Smart Vision Guide - Raspberry Pi Zero 2 W Setup
+# Local face recognition using OpenCV LBPH (NO dlib)
+# Optimized for low memory systems
 
 echo "=============================================="
 echo "Smart Vision Guide - Pi Zero 2W Setup"
+echo "Local Face Recognition (OpenCV LBPH)"
 echo "Optimized for minimal memory footprint"
 echo "=============================================="
 
-# Check if running on Raspberry Pi
+# Check Raspberry Pi
 if ! grep -q "Raspberry Pi" /proc/cpuinfo 2>/dev/null; then
-    echo "⚠️  Warning: This script is designed for Raspberry Pi."
+    echo "⚠️  Warning: Not running on Raspberry Pi"
     read -p "Continue anyway? (y/n) " -n 1 -r
     echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        exit 1
-    fi
+    [[ ! $REPLY =~ ^[Yy]$ ]] && exit 1
 fi
 
 echo ""
@@ -26,8 +26,8 @@ sudo apt-get upgrade -y
 
 echo ""
 echo "[2/8] Installing system dependencies..."
-echo "NOTE: Installing numpy, opencv, pillow, and pyaudio via apt (not pip)"
-echo "This prevents memory exhaustion during compilation on Pi Zero 2W"
+echo "NOTE: Heavy packages installed via apt to avoid compilation"
+
 sudo apt-get install -y \
     python3-pip \
     python3-venv \
@@ -38,6 +38,7 @@ sudo apt-get install -y \
     python3-requests \
     python3-rpi.gpio \
     libatlas-base-dev \
+    libopenblas-dev \
     libportaudio2 \
     portaudio19-dev \
     libasound2-dev \
@@ -55,200 +56,86 @@ sudo apt-get install -y \
     libraspberrypi-dev \
     libraspberrypi-bin \
     libgfortran5 \
-    libopenblas-dev \
     git \
     wget \
-    curl \
-    cmake \
-    libboost-python-dev \
-    python3-dlib
+    curl
 
 echo ""
-echo "[3/8] Loading camera driver for legacy Pi Camera..."
+echo "[3/8] Loading legacy Pi camera driver..."
 sudo modprobe bcm2835-v4l2 || true
 
-# Ensure driver loads at boot
 if ! grep -q bcm2835-v4l2 /etc/modules 2>/dev/null; then
     echo "bcm2835-v4l2" | sudo tee -a /etc/modules
-    echo "✓ Added bcm2835-v4l2 to /etc/modules"
 fi
 
 echo ""
-echo "[4/8] Configuring camera and GPU memory..."
-# Backup config.txt
+echo "[4/8] Configuring GPU memory & camera..."
 if [ -f /boot/config.txt ]; then
-    sudo cp /boot/config.txt /boot/config.txt.bak.$(date +%Y%m%d_%H%M%S) || true
-    
-    # Set GPU memory for camera
-    if ! grep -q "gpu_mem=128" /boot/config.txt; then
-        echo "gpu_mem=128" | sudo tee -a /boot/config.txt
-        echo "✓ Set gpu_mem=128"
-    fi
-    
-    # Enable camera
-    if ! grep -q "start_x=1" /boot/config.txt; then
-        echo "start_x=1" | sudo tee -a /boot/config.txt
-        echo "✓ Enabled camera (start_x=1)"
-    fi
+    sudo cp /boot/config.txt /boot/config.txt.bak.$(date +%s)
+
+    grep -q "gpu_mem=128" /boot/config.txt || echo "gpu_mem=128" | sudo tee -a /boot/config.txt
+    grep -q "start_x=1" /boot/config.txt || echo "start_x=1" | sudo tee -a /boot/config.txt
 fi
 
-# Enable camera via raspi-config
 echo ""
 echo "[5/8] Enabling interfaces..."
-sudo raspi-config nonint do_camera 0 2>/dev/null || true
-sudo raspi-config nonint do_i2c 0 2>/dev/null || true
-sudo raspi-config nonint do_spi 0 2>/dev/null || true
+sudo raspi-config nonint do_camera 0 || true
+sudo raspi-config nonint do_i2c 0 || true
+sudo raspi-config nonint do_spi 0 || true
 
 echo ""
 echo "[6/8] Creating Python virtual environment..."
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
 
-if [ -d "venv" ]; then
-    echo "⚠️  Virtual environment already exists. Removing old venv..."
-    rm -rf venv
-fi
-
-# CRITICAL: Use --system-site-packages to access apt-installed packages
+rm -rf venv
 python3 -m venv venv --system-site-packages
-echo "✓ Created venv with --system-site-packages"
-
 source venv/bin/activate
 
+echo "✓ Virtual environment created"
+
 echo ""
-echo "[7/8] Installing pure-Python packages..."
+echo "[7/8] Installing pure-Python dependencies..."
 python3 -m pip install --upgrade pip setuptools wheel
 
-# Install only pure-Python packages (requirements.txt)
+# requirements.txt should ONLY contain pure-Python libs
 pip install -r requirements.txt
 
-# Check Python version compatibility
-PYTHON_VERSION=$(python3 -c "import platform; print(platform.python_version())")
-if [[ ! $PYTHON_VERSION =~ ^3\.[7-9] ]]; then
-    echo "❌ Python 3.7 or higher is required. Current version: $PYTHON_VERSION"
-    exit 1
-fi
-
-# Ensure RPi.GPIO and OpenCV are installed
-if ! python3 -c "import RPi.GPIO" &>/dev/null; then
-    echo "Installing RPi.GPIO..."
-    pip install RPi.GPIO
-fi
-
-if ! python3 -c "import cv2" &>/dev/null; then
-    echo "Installing OpenCV..."
-    pip install opencv-python
-fi
-
-echo ""
-echo "[8/8] Setting up configuration..."
-
-# Create .env from example
-if [ ! -f ".env" ]; then
-    cp .env.example .env
-    echo "✓ Created .env file from example"
-    echo "⚠️  IMPORTANT: Edit .env with your API credentials!"
-else
-    echo "✓ .env file already exists"
-fi
-
-# Create face database
-if [ ! -f "face_database.json" ]; then
-    echo "{}" > face_database.json
-    echo "✓ Created empty face database"
-fi
-
-# Set up audio permissions
-sudo usermod -a -G audio "$USER" 2>/dev/null || true
-
-# Configure pulseaudio for Bluetooth
-if [ -f /etc/pulse/default.pa ]; then
-    if ! grep -q "load-module module-bluetooth-discover" /etc/pulse/default.pa; then
-        echo "load-module module-bluetooth-discover" | sudo tee -a /etc/pulse/default.pa
-        echo "✓ Enabled Bluetooth audio in PulseAudio"
-    fi
-fi
-
-# Create systemd service file
-echo ""
-echo "Creating systemd service file (optional)..."
-cat > smart-vision.service <<EOF
-[Unit]
-Description=Smart Vision Guide - Assistive Device for Visually Impaired
-After=network.target sound.target bluetooth.target
-Wants=bluetooth.target
-
-[Service]
-Type=simple
-User=$USER
-WorkingDirectory=$PROJECT_DIR
-Environment=PYTHONUNBUFFERED=1
-ExecStart=$PROJECT_DIR/venv/bin/python3 $PROJECT_DIR/main.py
-Restart=on-failure
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
+# Verify OpenCV face module
+python3 - <<EOF
+import cv2
+if not hasattr(cv2, "face"):
+    raise SystemExit("❌ OpenCV face module missing")
+print("✓ OpenCV face module available (LBPH ready)")
 EOF
 
-echo "✓ Created smart-vision.service"
+echo ""
+echo "[8/8] Final setup..."
 
-echo ""
-echo "=============================================="
-echo "✅ Setup Complete! All dependencies installed."
-echo "=============================================="
-echo ""
-echo "📋 Next Steps:"
-echo ""
-echo "1. Configure API credentials:"
-echo "   nano .env"
-echo ""
-echo "2. Get your API keys:"
-echo "   • OpenRouter (OpenRouter API key): https://openrouter.ai/" 
-echo "   • (Face++ removed - this project uses local offline face recognition)"
-echo ""
-echo "3. Pair Bluetooth audio device:"
-echo "   bluetoothctl"
-echo "   > scan on"
-echo "   > pair XX:XX:XX:XX:XX:XX"
-echo "   > trust XX:XX:XX:XX:XX:XX"
-echo "   > connect XX:XX:XX:XX:XX:XX"
-echo ""
-echo "4. Test hardware:"
-echo "   source venv/bin/activate"
-echo "   python3 test_hardware.py"
-echo ""
-echo "5. Run the application:"
-echo "   python3 main.py"
-echo ""
-echo "📦 Optional: Install as system service:"
-echo "   sudo cp smart-vision.service /etc/systemd/system/"
-echo "   sudo systemctl enable smart-vision"
-echo "   sudo systemctl start smart-vision"
-echo ""
-echo "💡 Memory Optimization Tips:"
-echo "   • The venv uses --system-site-packages for apt packages"
-echo "   • This saves ~200MB RAM vs pip-compiled packages"
-echo "   • Monitor memory: free -h or htop"
-echo "   • Monitor temperature: vcgencmd measure_temp"
-echo ""
-echo "=============================================="
+# Environment file
+[ -f .env ] || cp .env.example .env
 
-# Check if reboot is required
-if [ -f /var/run/reboot-required ] || ! lsmod | grep -q bcm2835_v4l2; then
-    echo ""
-    echo "⚠️  A reboot is required to complete setup."
-    echo "    (Camera driver or system updates)"
-    read -p "Reboot now? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        sudo reboot
-    else
-        echo "⚠️  Please reboot manually: sudo reboot"
-    fi
+# Face database directory
+mkdir -p faces
+[ -f face_labels.json ] || echo "{}" > face_labels.json
+
+# Audio permissions
+sudo usermod -a -G audio "$USER" || true
+
+# Enable Bluetooth audio
+if [ -f /etc/pulse/default.pa ]; then
+    grep -q module-bluetooth-discover /etc/pulse/default.pa || \
+    echo "load-module module-bluetooth-discover" | sudo tee -a /etc/pulse/default.pa
 fi
 
 echo ""
-echo "Setup script finished successfully!"
+echo "=============================================="
+echo "✅ Setup complete (Pi Zero 2 W safe)"
+echo "Local Face Recognition: OpenCV LBPH"
+echo "=============================================="
+
+echo ""
+echo "⚠️ Reboot required to finish setup"
+read -p "Reboot now? (y/n) " -n 1 -r
+echo
+[[ $REPLY =~ ^[Yy]$ ]] && sudo reboot
