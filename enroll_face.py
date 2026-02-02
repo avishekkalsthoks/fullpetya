@@ -11,8 +11,16 @@ import cv2
 from handlers.camera_handler import CameraHandler
 
 
-# Haar cascade for face detection
-CASCADE_PATH = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+# Haar cascade for face detection (support both old and new OpenCV)
+try:
+    CASCADE_PATH = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+except AttributeError:
+    # Fallback for older OpenCV versions (e.g., OpenCV 3.x on Buster)
+    import os
+    CASCADE_PATH = '/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml'
+    if not os.path.exists(CASCADE_PATH):
+        CASCADE_PATH = '/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml'
+
 face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
 
 

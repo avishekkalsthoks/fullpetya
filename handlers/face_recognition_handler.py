@@ -45,7 +45,16 @@ class FaceRecognitionHandler:
                 raise ImportError("❌ OpenCV face module is installed but recognizer functions are missing. Try: pip install opencv-contrib-python-headless")
         
         # Haar cascade for face detection (faster than HOG on Pi)
-        cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+        # Support both old and new OpenCV versions
+        try:
+            cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+        except AttributeError:
+            # Fallback for older OpenCV versions (e.g., OpenCV 3.x on Buster)
+            cascade_path = '/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml'
+            if not os.path.exists(cascade_path):
+                # Try alternative path
+                cascade_path = '/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml'
+        
         self.face_cascade = cv2.CascadeClassifier(cascade_path)
         
         # Label mappings
