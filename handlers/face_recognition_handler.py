@@ -49,13 +49,29 @@ class FaceRecognitionHandler:
         try:
             cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
         except AttributeError:
-            # Fallback for older OpenCV versions (e.g., OpenCV 3.x on Buster)
             cascade_path = '/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml'
-            if not os.path.exists(cascade_path):
-                # Try alternative path
-                cascade_path = '/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml'
+
+        if not os.path.exists(cascade_path):
+            # Try finding it in common locations
+            common_paths = [
+                '/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml',
+                '/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml',
+                '/usr/local/share/opencv/haarcascades/haarcascade_frontalface_default.xml',
+                 '/opt/vc/share/opencv/haarcascades/haarcascade_frontalface_default.xml'
+            ]
+            for path in common_paths:
+                if os.path.exists(path):
+                    cascade_path = path
+                    break
         
+        print(f"DEBUG: Using Haar cascade path: {cascade_path}")
         self.face_cascade = cv2.CascadeClassifier(cascade_path)
+        
+        if self.face_cascade.empty():
+            print(f"❌ Error: Could not load Haar cascade from {cascade_path}")
+            print("Please check if 'opencv-data' or 'libopencv-dev' is installed.")
+            # Don't exit here, just warn - simple face detection might fail but app can continue
+            print("⚠️ Face detection will fail until this is fixed.")
         
         # Label mappings
         self.label_to_name = {}  # {0: "ram", 1: "sita", ...}

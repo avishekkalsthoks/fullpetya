@@ -21,7 +21,28 @@ except AttributeError:
     if not os.path.exists(CASCADE_PATH):
         CASCADE_PATH = '/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml'
 
+    if not os.path.exists(CASCADE_PATH):
+        # Try finding it in common locations
+        common_paths = [
+            '/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml',
+            '/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml',
+            '/usr/local/share/opencv/haarcascades/haarcascade_frontalface_default.xml',
+            '/opt/vc/share/opencv/haarcascades/haarcascade_frontalface_default.xml'
+        ]
+        for path in common_paths:
+            if os.path.exists(path):
+                CASCADE_PATH = path
+                break
+
+print(f"DEBUG: Using Haar cascade path: {CASCADE_PATH}")
+
 face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
+if face_cascade.empty():
+    print(f"❌ Error: Could not load Haar cascade from {CASCADE_PATH}")
+    print("Please check if 'opencv-data' or 'libopencv-dev' is installed.")
+    print("Try running: sudo apt-get install opencv-data")
+    sys.exit(1)
+print("✓ Haar cascade loaded successfully")
 
 
 def detect_faces(image_path):
