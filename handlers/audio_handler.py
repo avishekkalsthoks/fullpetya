@@ -199,41 +199,76 @@ class AudioHandler:
     def switch_bluetooth_profile(self, mode='music'):
         """
         Switch Bluetooth profile to optimize for music (A2DP) or chat/mic (HSP/HFP).
-        
-        Args:
-            mode: 'music' (A2DP - High quality, no mic) or 'chat' (HSP/HFP - Mono, plus mic)
+        Dynamically detects available profiles to avoid errors.
         """
         try:
-            # 1. Get the Bluetooth card name (starts with bluez_card.)
-            result = subprocess.run(['pactl', 'list', 'short', 'cards'], 
-                                  capture_output=True, text=True, timeout=5)
+            # 1. Get full details of the Bluetooth card
+            result = subprocess.run(['pactl', 'list', 'cards'], 
+                                  capture_output=True, text=True, timeout=10)
             if result.returncode != 0:
                 return False
-                
-            card_name = None
-            for line in result.stdout.split('\n'):
-                if 'bluez_card' in line:
-                    card_name = line.split('\t')[1]
+            
+            # 2. Find the Bluetooth card and its profiles
+            cards_content = result.stdout.split('Card #')
+            bt_card_content = None
+            for card in cards_content:
+                if 'bluez_card' in card:
+                    bt_card_content = card
                     break
             
-            if not card_name:
+            if not bt_card_content:
                 print("No Bluetooth card found to switch profile.")
                 return False
 
-            # 2. Determine target profile
-            # These are standard PulseAudio profile names for Bluetooth
-            if mode == 'music':
-                profile = 'a2dp_sink'
-            else:
-                # Try common names for handsfree/mic profiles
-                profile = 'handsfree_headset' 
-                # verify if it exists, otherwise try fallback
-                check = subprocess.run(['pactl', 'list', 'cards'], capture_output=True, text=True)
-                if 'headset_head_unit' in check.stdout and 'handsfree_headset' not in check.stdout:
-                    profile = 'headset_head_unit'
+            # Extract card name (e.g., bluez_card.XX_XX_XX_XX_XX_XX)
+            import re
+            name_match = re.search(r'Name: (bluez_card\.[^\n\s]+)', bt_card_content)
+            if not name_match:
+                return False
+            card_full_name = name_match.group(1)
 
-            print(f"🔄 Switching Bluetooth profile to: {profile}")
-            subprocess.run(['pactl', 'set-card-profile', card_name, profile], 
+            # 3. List all available profiles
+            profiles = []
+            profile_section = False
+            for line in bt_card_content.split('\n'):
+                line = line.strip()
+                if line.startswith('Profiles:'):
+                    profile_section = True
+                    continue
+                if profile_section:
+                    if line.startswith('Active Profile:'):
+                        break
+                    # Profile line looks like: "a2dp_sink: High Fidelity Playback (A2DP Sink) (sinks: 1, sources: 0, priority: 40, available: yes)"
+                    match = re.match(r'^([^:]+):', line)
+                    if match:
+                        profiles.append(match.group(1))
+
+            # 4. Pick best match for target mode
+            target_profile = None
+            if mode == 'music':
+                # Prefer A2DP
+                for p in profiles:
+                    if 'a2dp' in p.lower():
+                        target_profile = p
+                        break
+            else:
+                # Prefer HSP/HFP (Handsfree/Headset)
+                for p in profiles:
+                    if any(x in p.lower() for x in ['hfp', 'hsp', 'headset', 'handsfree']):
+                        target_profile = p
+                        break
+            
+            if not target_profile:
+                print(f"⚠️ No suitable profile found for {mode} mode in {profiles}")
+                return False
+
+            # 5. Execute switch if not already active
+            if f"Active Profile: {target_profile}" in bt_card_content:
+                print(f"Profile {target_profile} is already active.")
+                return True
+
+            print(f"🔄 Switching Bluetooth profile to: {target_profile}")
+            subprocess.run(['pactl', 'set-card-profile', card_full_name, target_profile], 
                          capture_output=True, timeout=5, check=True)
             return True
             
