@@ -1,40 +1,57 @@
 """
 Local Face Recognition Handler for Smart Vision Guide
-Uses face_recognition library (dlib-based HOG detector) for offline face recognition.
-Optimized for Raspberry Pi Zero 2W with minimal RAM usage.
+Uses OpenCV LBPH (Local Binary Patterns Histograms) for offline face recognition.
+Optimized for Raspberry Pi Zero 2W - NO dlib required.
 """
 
 import os
-import face_recognition
 import cv2
+import numpy as np
 from typing import List, Dict, Optional
+import json
 
 
 class FaceRecognitionHandler:
     """
-    Local offline face recognition using HOG detector.
+    Local offline face recognition using OpenCV LBPH.
     Face database stored in directory structure: faces/person_name/image.jpg
+    
+    LBPH is lightweight and works well on Pi Zero 2W:
+    - No compilation required (pre-built in python3-opencv)
+    - Low memory usage (~50MB vs 500MB+ for dlib)
+    - Fast enough for single-face recognition
     """
     
-    def __init__(self, faces_dir="faces", distance_threshold=0.6):
+    def __init__(self, faces_dir="faces", labels_file="face_labels.json", confidence_threshold=80):
         """
         Initialize face recognition handler.
         
         Args:
             faces_dir: Directory containing face database (folder per person)
-            distance_threshold: Maximum distance for face match (0.5-0.6 recommended)
+            labels_file: JSON file mapping label IDs to names
+            confidence_threshold: Maximum confidence for match (lower = stricter, 50-100 typical)
         """
         self.faces_dir = faces_dir
-        self.distance_threshold = distance_threshold
-        self.known_encodings = []
-        self.known_names = []
+        self.labels_file = labels_file
+        self.confidence_threshold = confidence_threshold
         
-        # Load all known faces at startup
+        # LBPH recognizer
+        self.recognizer = cv2.face.LBPHFaceRecognizer_create()
+        
+        # Haar cascade for face detection (faster than HOG on Pi)
+        cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+        self.face_cascade = cv2.CascadeClassifier(cascade_path)
+        
+        # Label mappings
+        self.label_to_name = {}  # {0: "ram", 1: "sita", ...}
+        self.name_to_label = {}  # {"ram": 0, "sita": 1, ...}
+        
+        # Load face database
         self._load_face_database()
     
     def _load_face_database(self):
         """
-        Load face encodings from directory structure.
+        Load and train LBPH recognizer from directory structure.
         
         Directory structure:
         faces/
@@ -52,15 +69,23 @@ class FaceRecognitionHandler:
             print(f"✓ Created {self.faces_dir}. Add face images in person-named folders.")
             return
         
-        loaded_count = 0
+        faces = []
+        labels = []
+        current_label = 0
         
         # Iterate through person folders
-        for person_name in os.listdir(self.faces_dir):
+        for person_name in sorted(os.listdir(self.faces_dir)):
             person_path = os.path.join(self.faces_dir, person_name)
             
             # Skip if not a directory
             if not os.path.isdir(person_path):
                 continue
+            
+            # Assign label to this person
+            self.label_to_name[current_label] = person_name
+            self.name_to_label[person_name] = current_label
+            
+            person_face_count = 0
             
             # Load all images for this person
             for image_file in os.listdir(person_path):
@@ -70,31 +95,68 @@ class FaceRecognitionHandler:
                 image_path = os.path.join(person_path, image_file)
                 
                 try:
-                    # Load image
-                    image = face_recognition.load_image_file(image_path)
+                    # Load image in grayscale
+                    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
                     
-                    # Detect faces using HOG
-                    face_locations = face_recognition.face_locations(image, model="hog")
+                    if image is None:
+                        print(f"  ⚠️  Could not load {person_name}/{image_file}")
+                        continue
                     
-                    if len(face_locations) == 0:
+                    # Detect faces
+                    detected_faces = self.face_cascade.detectMultiScale(
+                        image,
+                        scaleFactor=1.1,
+                        minNeighbors=5,
+                        minSize=(30, 30)
+                    )
+                    
+                    if len(detected_faces) == 0:
                         print(f"  ⚠️  No face found in {person_name}/{image_file}")
                         continue
                     
-                    if len(face_locations) > 1:
+                    if len(detected_faces) > 1:
                         print(f"  ⚠️  Multiple faces in {person_name}/{image_file}, using first")
                     
-                    # Encode the first face
-                    encodings = face_recognition.face_encodings(image, face_locations)
-                    if encodings:
-                        self.known_encodings.append(encodings[0])
-                        self.known_names.append(person_name)
-                        loaded_count += 1
-                        print(f"  ✓ Loaded {person_name}/{image_file}")
+                    # Extract face region
+                    x, y, w, h = detected_faces[0]
+                    face_roi = image[y:y+h, x:x+w]
+                    
+                    # Resize to standard size for consistency
+                    face_roi = cv2.resize(face_roi, (100, 100))
+                    
+                    faces.append(face_roi)
+                    labels.append(current_label)
+                    person_face_count += 1
+                    print(f"  ✓ Loaded {person_name}/{image_file}")
                 
                 except Exception as e:
                     print(f"  ✗ Error loading {person_name}/{image_file}: {e}")
+            
+            if person_face_count > 0:
+                current_label += 1
+            else:
+                # Remove label if no valid faces loaded
+                del self.label_to_name[current_label]
+                del self.name_to_label[person_name]
         
-        print(f"✓ Face database loaded: {loaded_count} faces for {len(set(self.known_names))} people")
+        # Train the recognizer
+        if len(faces) > 0:
+            print(f"  Training LBPH recognizer with {len(faces)} face samples...")
+            self.recognizer.train(faces, np.array(labels))
+            print(f"✓ Face database loaded: {len(faces)} faces for {len(self.label_to_name)} people")
+            
+            # Save labels mapping
+            self._save_labels()
+        else:
+            print("⚠️  No faces loaded. Add images to faces/<person_name>/ folders.")
+    
+    def _save_labels(self):
+        """Save label-to-name mapping to JSON file."""
+        try:
+            with open(self.labels_file, 'w') as f:
+                json.dump(self.label_to_name, f, indent=2)
+        except Exception as e:
+            print(f"  ⚠️  Could not save labels: {e}")
     
     def recognize(self, image_path: str) -> str:
         """
@@ -108,58 +170,67 @@ class FaceRecognitionHandler:
         """
         try:
             # Check if we have any known faces
-            if len(self.known_encodings) == 0:
+            if len(self.label_to_name) == 0:
                 return "No faces enrolled in the database. Please add faces to the faces folder."
             
-            # Load and process image
-            image = face_recognition.load_image_file(image_path)
+            # Load image
+            image = cv2.imread(image_path)
+            if image is None:
+                return "Sorry, I could not load the image."
+            
+            # Convert to grayscale
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             
             # Resize if too large (max width 640px for Pi Zero performance)
-            height, width = image.shape[:2]
+            height, width = gray.shape[:2]
             if width > 640:
                 scale = 640 / width
                 new_width = 640
                 new_height = int(height * scale)
-                image = cv2.resize(image, (new_width, new_height))
+                gray = cv2.resize(gray, (new_width, new_height))
             
-            # Detect faces using HOG (faster than CNN)
+            # Detect faces
             print("  Detecting faces...")
-            face_locations = face_recognition.face_locations(image, model="hog")
+            detected_faces = self.face_cascade.detectMultiScale(
+                gray,
+                scaleFactor=1.1,
+                minNeighbors=5,
+                minSize=(30, 30)
+            )
             
-            if len(face_locations) == 0:
+            if len(detected_faces) == 0:
                 return "I don't see any faces in front of you."
             
-            # Encode detected faces
-            print(f"  Encoding {len(face_locations)} detected face(s)...")
-            face_encodings = face_recognition.face_encodings(image, face_locations)
+            print(f"  Found {len(detected_faces)} face(s), recognizing...")
             
             # Identify each face
             identified_people = []
             unknown_count = 0
             
-            for face_encoding in face_encodings:
-                # Compare with known faces
-                face_distances = face_recognition.face_distance(
-                    self.known_encodings, 
-                    face_encoding
-                )
+            for (x, y, w, h) in detected_faces:
+                # Extract face region
+                face_roi = gray[y:y+h, x:x+w]
+                face_roi = cv2.resize(face_roi, (100, 100))
                 
-                # Find best match
-                if len(face_distances) > 0:
-                    best_match_index = face_distances.argmin()
-                    best_distance = face_distances[best_match_index]
+                # Predict using LBPH
+                try:
+                    label, confidence = self.recognizer.predict(face_roi)
                     
-                    if best_distance <= self.distance_threshold:
-                        name = self.known_names[best_match_index]
-                        confidence = (1 - best_distance) * 100
-                        print(f"  ✓ Recognized: {name} ({confidence:.1f}% confidence)")
+                    # Lower confidence = better match in LBPH
+                    if confidence <= self.confidence_threshold:
+                        name = self.label_to_name.get(label, "Unknown")
+                        print(f"  ✓ Recognized: {name} (confidence: {confidence:.1f})")
                         
                         # Avoid duplicates
                         if name not in identified_people:
                             identified_people.append(name)
                     else:
-                        print(f"  ? Unknown person (best distance: {best_distance:.2f})")
+                        print(f"  ? Unknown person (confidence: {confidence:.1f} > threshold {self.confidence_threshold})")
                         unknown_count += 1
+                        
+                except Exception as e:
+                    print(f"  ✗ Recognition error: {e}")
+                    unknown_count += 1
             
             # Format result
             return self._format_result(identified_people, unknown_count)
@@ -238,12 +309,18 @@ class FaceRecognitionHandler:
     
     def get_enrolled_people(self) -> List[str]:
         """Get list of enrolled people (unique names)."""
-        return list(set(self.known_names))
+        return list(self.label_to_name.values())
     
     def get_stats(self) -> Dict:
         """Get face database statistics."""
         return {
-            'total_encodings': len(self.known_encodings),
-            'unique_people': len(set(self.known_names)),
+            'unique_people': len(self.label_to_name),
             'people': self.get_enrolled_people()
         }
+    
+    def reload_database(self):
+        """Reload face database (call after adding new faces)."""
+        self.label_to_name = {}
+        self.name_to_label = {}
+        self.recognizer = cv2.face.LBPHFaceRecognizer_create()
+        self._load_face_database()

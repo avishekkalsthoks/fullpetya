@@ -1,14 +1,35 @@
 """
 Face Enrollment Script for Local Face Recognition
-Creates folder-based face database for offline recognition.
+Creates folder-based face database for OpenCV LBPH recognition.
+NO dlib required - uses OpenCV Haar cascade for face detection.
 """
 
 import os
 import sys
 import argparse
-import face_recognition
 import cv2
 from handlers.camera_handler import CameraHandler
+
+
+# Haar cascade for face detection
+CASCADE_PATH = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
+
+
+def detect_faces(image_path):
+    """Detect faces in an image using OpenCV Haar cascade."""
+    image = cv2.imread(image_path)
+    if image is None:
+        return []
+    
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    faces = face_cascade.detectMultiScale(
+        gray,
+        scaleFactor=1.1,
+        minNeighbors=5,
+        minSize=(30, 30)
+    )
+    return faces
 
 
 def create_person_folder(faces_dir, person_name):
@@ -55,9 +76,8 @@ def enroll_from_camera(person_name, faces_dir="faces", num_photos=3):
                 tmp.write(image_bytes)
                 temp_path = tmp.name
             
-            # Verify face is detected
-            image = face_recognition.load_image_file(temp_path)
-            face_locations = face_recognition.face_locations(image, model="hog")
+            # Verify face is detected using OpenCV
+            face_locations = detect_faces(temp_path)
             
             if len(face_locations) == 0:
                 print("  ✗ No face detected. Please try again.")
@@ -116,9 +136,8 @@ def enroll_from_image(person_name, image_path, faces_dir="faces"):
     person_path = create_person_folder(faces_dir, person_name)
     
     try:
-        # Verify face is detected
-        image = face_recognition.load_image_file(image_path)
-        face_locations = face_recognition.face_locations(image, model="hog")
+        # Verify face is detected using OpenCV
+        face_locations = detect_faces(image_path)
         
         if len(face_locations) == 0:
             print("✗ No face detected in image")
@@ -190,7 +209,7 @@ def remove_person(person_name, faces_dir="faces"):
 
 def main():
     """Main enrollment interface."""
-    parser = argparse.ArgumentParser(description="Enroll faces for local face recognition")
+    parser = argparse.ArgumentParser(description="Enroll faces for local face recognition (OpenCV LBPH)")
     parser.add_argument('name', nargs='?', help='Person name to enroll')
     parser.add_argument('--image', '-i', help='Path to existing image file')
     parser.add_argument('--photos', '-p', type=int, default=3, help='Number of photos to capture (default: 3)')
