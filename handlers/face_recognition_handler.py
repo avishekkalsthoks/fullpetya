@@ -35,8 +35,14 @@ class FaceRecognitionHandler:
         self.labels_file = labels_file
         self.confidence_threshold = confidence_threshold
         
-        # LBPH recognizer
-        self.recognizer = cv2.face.LBPHFaceRecognizer_create()
+        # LBPH recognizer (support both OpenCV 3 and 4)
+        try:
+            self.recognizer = cv2.face.LBPHFaceRecognizer_create()
+        except AttributeError:
+            try:
+                self.recognizer = cv2.face.createLBPHFaceRecognizer()
+            except AttributeError:
+                raise ImportError("❌ OpenCV face module is installed but recognizer functions are missing. Try: pip install opencv-contrib-python-headless")
         
         # Haar cascade for face detection (faster than HOG on Pi)
         cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
@@ -322,5 +328,11 @@ class FaceRecognitionHandler:
         """Reload face database (call after adding new faces)."""
         self.label_to_name = {}
         self.name_to_label = {}
-        self.recognizer = cv2.face.LBPHFaceRecognizer_create()
+        
+        # Re-initialize recognizer
+        try:
+            self.recognizer = cv2.face.LBPHFaceRecognizer_create()
+        except AttributeError:
+            self.recognizer = cv2.face.createLBPHFaceRecognizer()
+            
         self._load_face_database()
