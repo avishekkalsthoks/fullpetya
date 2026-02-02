@@ -238,8 +238,10 @@ class AudioHandler:
                 if profile_section:
                     if line.startswith('Active Profile:'):
                         break
+                    
                     # Profile line looks like: "a2dp_sink: High Fidelity Playback (A2DP Sink) (sinks: 1, sources: 0, priority: 40, available: yes)"
-                    match = re.match(r'^([^:]+):', line)
+                    # We ONLY want profiles that are "available: yes" or "available: unknown"
+                    match = re.match(r'^([^:]+):.*available: (yes|unknown)', line)
                     if match:
                         profiles.append(match.group(1))
 
@@ -259,17 +261,24 @@ class AudioHandler:
                         break
             
             if not target_profile:
-                print(f"⚠️ No suitable profile found for {mode} mode in {profiles}")
+                if mode == 'chat':
+                    print("⚠️ Note: Headset does not seem to support a microphone profile (HSP/HFP).")
+                else:
+                    print(f"⚠️ No suitable profile found for {mode} mode.")
                 return False
 
             # 5. Execute switch if not already active
             if f"Active Profile: {target_profile}" in bt_card_content:
-                print(f"Profile {target_profile} is already active.")
                 return True
 
             print(f"🔄 Switching Bluetooth profile to: {target_profile}")
-            subprocess.run(['pactl', 'set-card-profile', card_full_name, target_profile], 
-                         capture_output=True, timeout=5, check=True)
+            result = subprocess.run(['pactl', 'set-card-profile', card_full_name, target_profile], 
+                                  capture_output=True, timeout=5)
+            
+            if result.returncode != 0:
+                print(f"⚠️ Failed to switch to {target_profile}. Your headset might be in a mode that doesn't allow profile switching.")
+                return False
+                
             return True
             
         except Exception as e:
