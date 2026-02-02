@@ -110,7 +110,7 @@ class SmartVision:
         except Exception as e:
             print(f"⚠️  AI service not configured: {e}")
             print("   Describe, OCR, and Search modes will not work.")
-            print("   Please set HF_TOKEN in .env file.")
+            print("   Please set OPENROUTER_API_KEY in .env file.")
             self.ai = None
         
         # Initialize face handler (local offline recognition)

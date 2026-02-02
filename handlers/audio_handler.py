@@ -6,7 +6,6 @@ Optimized for Raspberry Pi Zero 2W with Bluetooth audio support and minimal over
 import subprocess
 import shutil
 import os
-from gtts import gTTS
 
 
 class AudioHandler:
@@ -59,54 +58,60 @@ class AudioHandler:
             
         if self.backend == 'gtts':
             try:
-                tts = gTTS(text=text, lang=lang, slow=False)
-                tmp = '/tmp/speech.mp3'
-                tts.save(tmp)
-                
-                # Try multiple playback methods
-                played = False
-                
-                # Method 1: ffplay (most reliable)
-                if shutil.which('ffplay'):
-                    result = subprocess.run(
-                        ['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet', tmp],
-                        capture_output=True,
-                        timeout=30
-                    )
-                    played = result.returncode == 0
-                
-                # Method 2: mpg123
-                if not played and shutil.which('mpg123'):
-                    result = subprocess.run(
-                        ['mpg123', '-q', tmp],
-                        capture_output=True,
-                        timeout=30
-                    )
-                    played = result.returncode == 0
-                
-                # Method 3: aplay with sox conversion
-                if not played and shutil.which('sox') and shutil.which('aplay'):
-                    wav_tmp = '/tmp/speech.wav'
-                    subprocess.run(['sox', tmp, wav_tmp], 
-                                 capture_output=True, 
-                                 timeout=10)
-                    subprocess.run(['aplay', '-q', wav_tmp], 
-                                 capture_output=True, 
-                                 timeout=30)
-                
-                # Cleanup
-                try:
-                    os.remove(tmp)
-                    if os.path.exists('/tmp/speech.wav'):
-                        os.remove('/tmp/speech.wav')
-                except:
-                    pass
-                    
-                return
-                
+                # Import gTTS lazily to avoid failing when gTTS isn't installed
+                from gtts import gTTS
             except Exception as e:
-                print(f"gTTS error: {e}, falling back to espeak")
-                # Fall through to espeak
+                print(f"gTTS import error: {e}, falling back to espeak")
+            else:
+                try:
+                    tts = gTTS(text=text, lang=lang, slow=False)
+                    tmp = '/tmp/speech.mp3'
+                    tts.save(tmp)
+                    
+                    # Try multiple playback methods
+                    played = False
+                    
+                    # Method 1: ffplay (most reliable)
+                    if shutil.which('ffplay'):
+                        result = subprocess.run(
+                            ['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet', tmp],
+                            capture_output=True,
+                            timeout=30
+                        )
+                        played = result.returncode == 0
+                    
+                    # Method 2: mpg123
+                    if not played and shutil.which('mpg123'):
+                        result = subprocess.run(
+                            ['mpg123', '-q', tmp],
+                            capture_output=True,
+                            timeout=30
+                        )
+                        played = result.returncode == 0
+                    
+                    # Method 3: aplay with sox conversion
+                    if not played and shutil.which('sox') and shutil.which('aplay'):
+                        wav_tmp = '/tmp/speech.wav'
+                        subprocess.run(['sox', tmp, wav_tmp], 
+                                     capture_output=True, 
+                                     timeout=10)
+                        subprocess.run(['aplay', '-q', wav_tmp], 
+                                     capture_output=True, 
+                                     timeout=30)
+                    
+                    # Cleanup
+                    try:
+                        os.remove(tmp)
+                        if os.path.exists('/tmp/speech.wav'):
+                            os.remove('/tmp/speech.wav')
+                    except:
+                        pass
+                        
+                    return
+                    
+                except Exception as e:
+                    print(f"gTTS error: {e}, falling back to espeak")
+                    # Fall through to espeak
 
         # Default: offline espeak (fast, low overhead)
         try:
