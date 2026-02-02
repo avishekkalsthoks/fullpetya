@@ -350,14 +350,18 @@ class SmartVision:
         Returns:
             Search query string or None if cancelled
         """
-        # Placeholder - announce that we're listening
+        # Announce and switch to chat mode for microphone access
         self.audio.say("Listening. What should I search for?")
+        self.audio.switch_bluetooth_profile('chat')
         
         # For demonstration, return a default query
         # In production, replace with actual speech recognition
         # For now, we'll search for "person" as a fallback
         time.sleep(2)  # Simulate listening time
         query = "person"
+        
+        # Switch back to music mode to save RAM and restore quality
+        self.audio.switch_bluetooth_profile('music')
         
         print(f"🎤 Heard: {query}")
         self.audio.say(f"Searching for {query}")

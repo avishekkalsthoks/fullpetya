@@ -196,6 +196,51 @@ class AudioHandler:
         except Exception:
             pass  # Silently fail if beep not available
     
+    def switch_bluetooth_profile(self, mode='music'):
+        """
+        Switch Bluetooth profile to optimize for music (A2DP) or chat/mic (HSP/HFP).
+        
+        Args:
+            mode: 'music' (A2DP - High quality, no mic) or 'chat' (HSP/HFP - Mono, plus mic)
+        """
+        try:
+            # 1. Get the Bluetooth card name (starts with bluez_card.)
+            result = subprocess.run(['pactl', 'list', 'short', 'cards'], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode != 0:
+                return False
+                
+            card_name = None
+            for line in result.stdout.split('\n'):
+                if 'bluez_card' in line:
+                    card_name = line.split('\t')[1]
+                    break
+            
+            if not card_name:
+                print("No Bluetooth card found to switch profile.")
+                return False
+
+            # 2. Determine target profile
+            # These are standard PulseAudio profile names for Bluetooth
+            if mode == 'music':
+                profile = 'a2dp_sink'
+            else:
+                # Try common names for handsfree/mic profiles
+                profile = 'handsfree_headset' 
+                # verify if it exists, otherwise try fallback
+                check = subprocess.run(['pactl', 'list', 'cards'], capture_output=True, text=True)
+                if 'headset_head_unit' in check.stdout and 'handsfree_headset' not in check.stdout:
+                    profile = 'headset_head_unit'
+
+            print(f"🔄 Switching Bluetooth profile to: {profile}")
+            subprocess.run(['pactl', 'set-card-profile', card_name, profile], 
+                         capture_output=True, timeout=5, check=True)
+            return True
+            
+        except Exception as e:
+            print(f"Error switching Bluetooth profile: {e}")
+            return False
+
     def get_audio_status(self):
         """
         Get detailed status of audio devices (Sinks and Sources).
