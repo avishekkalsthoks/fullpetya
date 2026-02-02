@@ -11,36 +11,55 @@ import cv2
 from handlers.camera_handler import CameraHandler
 
 
-# Haar cascade for face detection (support both old and new OpenCV)
-try:
-    CASCADE_PATH = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-except AttributeError:
-    # Fallback for older OpenCV versions (e.g., OpenCV 3.x on Buster)
-    import os
-    CASCADE_PATH = '/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml'
-    if not os.path.exists(CASCADE_PATH):
-        CASCADE_PATH = '/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml'
+def ensure_haar_cascade():
+    """Ensure the Haar cascade XML file exists, downloading it if necessary."""
+    local_path = 'haarcascade_frontalface_default.xml'
+    
+    # 1. Try OpenCV's built-in data path
+    try:
+        path = cv2.data.haarcascades + local_path
+        if os.path.exists(path):
+            return path
+    except AttributeError:
+        pass
 
-    if not os.path.exists(CASCADE_PATH):
-        # Try finding it in common locations
-        common_paths = [
-            '/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml',
-            '/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml',
-            '/usr/local/share/opencv/haarcascades/haarcascade_frontalface_default.xml',
-            '/opt/vc/share/opencv/haarcascades/haarcascade_frontalface_default.xml'
-        ]
-        for path in common_paths:
-            if os.path.exists(path):
-                CASCADE_PATH = path
-                break
+    # 2. Try common system paths
+    common_paths = [
+        '/usr/share/opencv/haarcascades/' + local_path,
+        '/usr/share/opencv4/haarcascades/' + local_path,
+        '/usr/local/share/opencv/haarcascades/' + local_path,
+        '/opt/vc/share/opencv/haarcascades/' + local_path,
+        local_path # Current directory
+    ]
+    
+    for path in common_paths:
+        if os.path.exists(path):
+            return path
+
+    # 3. Download if not found
+    print(f"⚠️  Haar cascade not found on system. Downloading to {local_path}...")
+    url = f"https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/{local_path}"
+    try:
+        import urllib.request
+        urllib.request.urlretrieve(url, local_path)
+        print("✓ Downloaded Haar cascade successfully")
+        return local_path
+    except Exception as e:
+        print(f"✗ Failed to download Haar cascade: {e}")
+        print("Please run: sudo apt-get install opencv-data")
+        return None
+
+CASCADE_PATH = ensure_haar_cascade()
+
+if not CASCADE_PATH:
+    print("❌ Error: Haar cascade file missing and could not be downloaded.")
+    sys.exit(1)
 
 print(f"DEBUG: Using Haar cascade path: {CASCADE_PATH}")
 
 face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
 if face_cascade.empty():
     print(f"❌ Error: Could not load Haar cascade from {CASCADE_PATH}")
-    print("Please check if 'opencv-data' or 'libopencv-dev' is installed.")
-    print("Try running: sudo apt-get install opencv-data")
     sys.exit(1)
 print("✓ Haar cascade loaded successfully")
 

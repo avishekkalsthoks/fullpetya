@@ -37,6 +37,7 @@ sudo apt-get install -y \
     python3-pyaudio \
     python3-requests \
     python3-rpi.gpio \
+    opencv-data \
     libatlas-base-dev \
     libopenblas-dev \
     libportaudio2 \

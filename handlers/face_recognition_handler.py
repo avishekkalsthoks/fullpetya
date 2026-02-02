@@ -35,6 +35,56 @@ class FaceRecognitionHandler:
         self.labels_file = labels_file
         self.confidence_threshold = confidence_threshold
         
+    def _ensure_haar_cascade(self):
+        """Ensure the Haar cascade XML file exists, downloading it if necessary."""
+        local_path = 'haarcascade_frontalface_default.xml'
+        
+        # 1. Try OpenCV's built-in data path
+        try:
+            path = cv2.data.haarcascades + local_path
+            if os.path.exists(path):
+                return path
+        except AttributeError:
+            pass
+
+        # 2. Try common system paths
+        common_paths = [
+            '/usr/share/opencv/haarcascades/' + local_path,
+            '/usr/share/opencv4/haarcascades/' + local_path,
+            '/usr/local/share/opencv/haarcascades/' + local_path,
+            '/opt/vc/share/opencv/haarcascades/' + local_path,
+            local_path # Current directory
+        ]
+        
+        for path in common_paths:
+            if os.path.exists(path):
+                return path
+
+        # 3. Download if not found
+        print(f"⚠️  Haar cascade not found on system. Downloading to {local_path}...")
+        url = f"https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/{local_path}"
+        try:
+            import urllib.request
+            urllib.request.urlretrieve(url, local_path)
+            print("✓ Downloaded Haar cascade successfully")
+            return local_path
+        except Exception as e:
+            print(f"✗ Failed to download Haar cascade: {e}")
+            return None
+
+    def __init__(self, faces_dir="faces", labels_file="face_labels.json", confidence_threshold=80):
+        """
+        Initialize face recognition handler.
+        
+        Args:
+            faces_dir: Directory containing face database (folder per person)
+            labels_file: JSON file mapping label IDs to names
+            confidence_threshold: Maximum confidence for match (lower = stricter, 50-100 typical)
+        """
+        self.faces_dir = faces_dir
+        self.labels_file = labels_file
+        self.confidence_threshold = confidence_threshold
+        
         # LBPH recognizer (support both OpenCV 3 and 4)
         try:
             self.recognizer = cv2.face.LBPHFaceRecognizer_create()
@@ -44,34 +94,20 @@ class FaceRecognitionHandler:
             except AttributeError:
                 raise ImportError("❌ OpenCV face module is installed but recognizer functions are missing. Try: pip install opencv-contrib-python-headless")
         
-        # Haar cascade for face detection (faster than HOG on Pi)
-        # Support both old and new OpenCV versions
-        try:
-            cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-        except AttributeError:
-            cascade_path = '/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml'
-
-        if not os.path.exists(cascade_path):
-            # Try finding it in common locations
-            common_paths = [
-                '/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml',
-                '/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml',
-                '/usr/local/share/opencv/haarcascades/haarcascade_frontalface_default.xml',
-                 '/opt/vc/share/opencv/haarcascades/haarcascade_frontalface_default.xml'
-            ]
-            for path in common_paths:
-                if os.path.exists(path):
-                    cascade_path = path
-                    break
-        
-        print(f"DEBUG: Using Haar cascade path: {cascade_path}")
-        self.face_cascade = cv2.CascadeClassifier(cascade_path)
-        
-        if self.face_cascade.empty():
-            print(f"❌ Error: Could not load Haar cascade from {cascade_path}")
-            print("Please check if 'opencv-data' or 'libopencv-dev' is installed.")
-            # Don't exit here, just warn - simple face detection might fail but app can continue
-            print("⚠️ Face detection will fail until this is fixed.")
+        # Haar cascade for face detection
+        cascade_path = self._ensure_haar_cascade()
+        if not cascade_path:
+            print("❌ Error: Haar cascade file missing and could not be downloaded.")
+            self.face_cascade = None
+        else:
+            print(f"DEBUG: Using Haar cascade path: {cascade_path}")
+            self.face_cascade = cv2.CascadeClassifier(cascade_path)
+            
+            if self.face_cascade.empty():
+                print(f"❌ Error: Could not load Haar cascade from {cascade_path}")
+                self.face_cascade = None
+            else:
+                print("✓ Haar cascade loaded successfully")
         
         # Label mappings
         self.label_to_name = {}  # {0: "ram", 1: "sita", ...}
