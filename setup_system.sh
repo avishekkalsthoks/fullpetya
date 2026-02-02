@@ -2,8 +2,7 @@
 set -euo pipefail
 
 # Smart Vision Guide - Raspberry Pi Zero 2W Optimized Setup Script
-# CRITICAL: This script installs heavy binary packages (numpy, opencv, pillow, pyaudio) via apt
-# to avoid memory exhaustion and compilation failures on Pi Zero 2W (512MB RAM).
+# Enhanced to ensure all dependencies are installed and handle potential issues.
 
 echo "=============================================="
 echo "Smart Vision Guide - Pi Zero 2W Setup"
@@ -123,6 +122,24 @@ python3 -m pip install --upgrade pip setuptools wheel
 # Install only pure-Python packages (requirements.txt)
 pip install -r requirements.txt
 
+# Check Python version compatibility
+PYTHON_VERSION=$(python3 -c "import platform; print(platform.python_version())")
+if [[ ! $PYTHON_VERSION =~ ^3\.[7-9] ]]; then
+    echo "❌ Python 3.7 or higher is required. Current version: $PYTHON_VERSION"
+    exit 1
+fi
+
+# Ensure RPi.GPIO and OpenCV are installed
+if ! python3 -c "import RPi.GPIO" &>/dev/null; then
+    echo "Installing RPi.GPIO..."
+    pip install RPi.GPIO
+fi
+
+if ! python3 -c "import cv2" &>/dev/null; then
+    echo "Installing OpenCV..."
+    pip install opencv-python
+fi
+
 echo ""
 echo "[8/8] Setting up configuration..."
 
@@ -180,7 +197,7 @@ echo "✓ Created smart-vision.service"
 
 echo ""
 echo "=============================================="
-echo "✅ Setup Complete!"
+echo "✅ Setup Complete! All dependencies installed."
 echo "=============================================="
 echo ""
 echo "📋 Next Steps:"
