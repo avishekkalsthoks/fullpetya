@@ -357,7 +357,12 @@ class SmartVision:
         # In production, replace with actual speech recognition
         # For now, we'll search for "person" as a fallback
         time.sleep(2)  # Simulate listening time
-        return "person"
+        query = "person"
+        
+        print(f"🎤 Heard: {query}")
+        self.audio.say(f"Searching for {query}")
+        
+        return query
 
     def _shutdown(self):
         """Shutdown the system gracefully."""

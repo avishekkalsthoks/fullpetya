@@ -157,14 +157,27 @@ def test_audio():
         print("Testing espeak...")
         audio.say("Audio test successful. Smart Vision Guide is ready.")
         
-        # Test Bluetooth detection
-        bt_sinks = audio.get_bluetooth_sinks()
+        # Test Bluetooth detection (detailed status)
+        audio_status = audio.get_audio_status()
+        
+        # Check Sinks (Outputs)
+        bt_sinks = [s['name'] for s in audio_status['sinks'] if s['bluetooth']]
         if bt_sinks:
-            print(f"✓ Found {len(bt_sinks)} Bluetooth audio sink(s):")
+            print(f"✓ Found {len(bt_sinks)} Bluetooth AUDIO SINK (Output):")
             for sink in bt_sinks:
                 print(f"    - {sink}")
         else:
-            print("  No Bluetooth audio sinks detected")
+            print("  No Bluetooth AUDIO SINKS (Outputs) detected")
+            
+        # Check Sources (Inputs)
+        bt_sources = [s['name'] for s in audio_status['sources'] if s['bluetooth']]
+        if bt_sources:
+            print(f"✓ Found {len(bt_sources)} Bluetooth AUDIO SOURCE (Microphone/Input):")
+            for source in bt_sources:
+                print(f"    - {source}")
+        else:
+            print("  No Bluetooth AUDIO SOURCES (Inputs) detected")
+            print("  ⚠️  If your headset is connected, it might be in Output-only mode.")
         
         print("✓ Audio test completed")
         return True

@@ -196,30 +196,48 @@ class AudioHandler:
         except Exception:
             pass  # Silently fail if beep not available
     
-    def get_bluetooth_sinks(self):
-        """Get available PulseAudio Bluetooth sinks."""
-        try:
-            result = subprocess.run(
-                ['pactl', 'list', 'short', 'sinks'],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            
-            if result.returncode == 0:
-                sinks = []
-                for line in result.stdout.split('\n'):
-                    if 'bluez' in line.lower():
-                        parts = line.split()
-                        if parts:
-                            sinks.append(parts[1])  # Sink name
-                return sinks
-            
-        except Exception as e:
-            print(f"Error getting Bluetooth sinks: {e}")
+    def get_audio_status(self):
+        """
+        Get detailed status of audio devices (Sinks and Sources).
+        Useful for diagnosing Bluetooth input/output issues.
+        """
+        status = {
+            'sinks': [],   # Outputs (Speakers/Headphones)
+            'sources': []  # Inputs (Microphones)
+        }
         
-        return []
-    
+        try:
+            # Check Sinks (Outputs)
+            result = subprocess.run(['pactl', 'list', 'short', 'sinks'], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    if line:
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            name = parts[1]
+                            is_bt = 'bluez' in name.lower()
+                            status['sinks'].append({'name': name, 'bluetooth': is_bt})
+            
+            # Check Sources (Inputs)
+            result = subprocess.run(['pactl', 'list', 'short', 'sources'], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    if line:
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            name = parts[1]
+                            # Filter out monitor sources (they are just loopbacks of sinks)
+                            if '.monitor' not in name.lower():
+                                is_bt = 'bluez' in name.lower()
+                                status['sources'].append({'name': name, 'bluetooth': is_bt})
+                                
+        except Exception as e:
+            print(f"Error getting audio status: {e}")
+            
+        return status
+
     def set_default_sink(self, sink_name):
         """Set default PulseAudio sink for Bluetooth routing."""
         try:
