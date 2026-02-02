@@ -123,10 +123,27 @@ mkdir -p faces
 # Audio permissions
 sudo usermod -a -G audio "$USER" || true
 
-# Enable Bluetooth audio
+# Enable Bluetooth audio & microphone (HSP/HFP)
 if [ -f /etc/pulse/default.pa ]; then
-    grep -q module-bluetooth-discover /etc/pulse/default.pa || \
+    echo "Configuring PulseAudio for Bluetooth microphone support..."
+    # Ensure module-bluetooth-discover is loaded
+    grep -q "module-bluetooth-discover" /etc/pulse/default.pa || \
     echo "load-module module-bluetooth-discover" | sudo tee -a /etc/pulse/default.pa
+    
+    # Enable bluetooth-policy for automatic profile switching
+    grep -q "module-bluetooth-policy" /etc/pulse/default.pa || \
+    echo "load-module module-bluetooth-policy" | sudo tee -a /etc/pulse/default.pa
+    
+    # Optimize for HSP/HFP (Hands-free profile)
+    if ! grep -q "auto_switch=2" /etc/pulse/default.pa; then
+        sudo sed -i 's/load-module module-bluetooth-policy/load-module module-bluetooth-policy auto_switch=2/g' /etc/pulse/default.pa
+    fi
+fi
+
+# Enable MultiProfile in Bluetooth main.conf
+if [ -f /etc/bluetooth/main.conf ]; then
+    echo "Enabling Bluetooth MultiProfile support..."
+    sudo sed -i 's/#MultiProfile = off/MultiProfile = multiple/g' /etc/bluetooth/main.conf
 fi
 
 echo ""
