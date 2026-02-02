@@ -118,7 +118,7 @@ class SmartVision:
             from handlers.face_recognition_handler import FaceRecognitionHandler
             self.face = FaceRecognitionHandler(faces_dir='faces')
             stats = self.face.get_stats()
-            print(f"✓ Local face recognition initialized: {stats['unique_people']} people, {stats['total_encodings']} encodings")
+            print(f"✓ Local face recognition initialized: {stats['unique_people']} people enrolled")
         except Exception as e:
             print(f"⚠️  Face recognition not available: {e}")
             print("   Face mode will not work.")

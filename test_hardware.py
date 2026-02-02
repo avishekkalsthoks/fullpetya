@@ -252,7 +252,6 @@ def test_face_recognition():
         stats = face.get_stats()
         print(f"✓ Local face recognition initialized")
         print(f"  Enrolled people: {stats['unique_people']}")
-        print(f"  Total encodings: {stats['total_encodings']}")
         
         if stats['people']:
             for name in stats['people']:
