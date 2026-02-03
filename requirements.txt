@@ -5,8 +5,9 @@ requests>=2.22.0
 Pillow>=6.0.0,<10.0.0
 python-dotenv>=0.20.0
 gTTS>=2.3.0
-pytesseract>=0.3.10
-vosk>=0.3.45
+# Buster (Py 3.7) compatible
+pytesseract>=0.3.10,<0.3.13
+# Vosk wheels for Py 3.7 may not be available on piwheels; install separately if needed.
 RPi.GPIO>=0.7.1; platform_machine=='armv6l' or platform_machine=='armv7l' or platform_machine=='aarch64'
 
 # OpenCV is installed via apt (python3-opencv) in setup_system.sh

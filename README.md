@@ -126,7 +126,7 @@ On Pi Zero 2W, pip builds can fail due to low RAM. Use piwheels:
 pip install --no-cache-dir --prefer-binary --index-url https://www.piwheels.org/simple -r requirements.txt
 ```
 
-If Vosk fails to install, disable speech input:
+If Vosk fails to install (common on Python 3.7), disable speech input:
 ```bash
 STT_BACKEND=none
 ```

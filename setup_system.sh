@@ -110,16 +110,13 @@ pip install $PIP_FLAGS -r requirements.txt || {
     pip install --no-cache-dir -r requirements.txt
 }
 
-# Optional: Vosk may fail on low-memory systems; continue if it does
-python3 - <<'EOF'
-import importlib
-try:
-    importlib.import_module("vosk")
-    print("✓ Vosk installed")
-except Exception as e:
-    print("⚠️  Vosk not available:", e)
-    print("   You can set STT_BACKEND=none to disable speech input.")
-EOF
+# Optional: Vosk (speech-to-text)
+echo ""
+echo "Optional: Installing Vosk (offline speech-to-text)..."
+pip install $PIP_FLAGS 'vosk<0.3.46' || {
+    echo "⚠️  Vosk install failed. Speech input will be disabled."
+    echo "   Set STT_BACKEND=none in .env if needed."
+}
 
 # Verify OpenCV face module
 python3 - <<EOF
