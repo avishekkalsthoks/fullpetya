@@ -36,8 +36,11 @@ sudo apt-get install -y \
     python3-pil \
     python3-pyaudio \
     python3-requests \
+    python3-pytesseract \
     python3-rpi.gpio \
     opencv-data \
+    tesseract-ocr \
+    tesseract-ocr-eng \
     libatlas-base-dev \
     libopenblas-dev \
     libportaudio2 \
@@ -48,11 +51,14 @@ sudo apt-get install -y \
     bluez \
     bluetooth \
     libbluetooth-dev \
+    libttspico-utils \
+    espeak-ng \
     sox \
     espeak \
     ffmpeg \
     mpg123 \
     alsa-utils \
+    unzip \
     libraspberrypi0 \
     libraspberrypi-dev \
     libraspberrypi-bin \
@@ -119,6 +125,13 @@ echo "[8/8] Final setup..."
 # Face database directory
 mkdir -p faces
 [ -f face_labels.json ] || echo "{}" > face_labels.json
+
+# Models directory
+mkdir -p models
+
+# Ensure helper scripts are executable
+chmod +x "$PROJECT_DIR/scripts/download_models.sh" || true
+chmod +x "$PROJECT_DIR/scripts/bt_autoconnect.sh" || true
 
 # Audio permissions
 sudo usermod -a -G audio "$USER" || true

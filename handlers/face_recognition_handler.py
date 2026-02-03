@@ -1,399 +1,216 @@
 """
 Local Face Recognition Handler for Smart Vision Guide
-Uses OpenCV LBPH (Local Binary Patterns Histograms) for offline face recognition.
-Optimized for Raspberry Pi Zero 2W - NO dlib required.
+Uses OpenCV LBPH (Local Binary Patterns Histograms) for offline recognition.
+Improved detection via DNN (Res10 SSD) with Haar fallback.
 """
 
+from __future__ import annotations
+
 import os
+import json
+from typing import List, Dict
+
 import cv2
 import numpy as np
-from typing import List, Dict, Optional
-import json
+
+from handlers.face_detection import FaceDetector
 
 
 class FaceRecognitionHandler:
     """
     Local offline face recognition using OpenCV LBPH.
     Face database stored in directory structure: faces/person_name/image.jpg
-    
-    LBPH is lightweight and works well on Pi Zero 2W:
-    - No compilation required (pre-built in python3-opencv)
-    - Low memory usage (~50MB vs 500MB+ for dlib)
-    - Fast enough for single-face recognition
     """
-    
+
     def __init__(self, faces_dir="faces", labels_file="face_labels.json", confidence_threshold=80):
-        """
-        Initialize face recognition handler.
-        
-        Args:
-            faces_dir: Directory containing face database (folder per person)
-            labels_file: JSON file mapping label IDs to names
-            confidence_threshold: Maximum confidence for match (lower = stricter, 50-100 typical)
-        """
         self.faces_dir = faces_dir
         self.labels_file = labels_file
         self.confidence_threshold = confidence_threshold
-        
-    def _ensure_haar_cascade(self):
-        """Ensure the Haar cascade XML file exists, downloading it if necessary."""
-        local_path = 'haarcascade_frontalface_default.xml'
-        
-        # 1. Try OpenCV's built-in data path
-        try:
-            path = cv2.data.haarcascades + local_path
-            if os.path.exists(path):
-                return path
-        except AttributeError:
-            pass
 
-        # 2. Try common system paths
-        common_paths = [
-            '/usr/share/opencv/haarcascades/' + local_path,
-            '/usr/share/opencv4/haarcascades/' + local_path,
-            '/usr/local/share/opencv/haarcascades/' + local_path,
-            '/opt/vc/share/opencv/haarcascades/' + local_path,
-            local_path # Current directory
-        ]
-        
-        for path in common_paths:
-            if os.path.exists(path):
-                return path
-
-        # 3. Download if not found
-        print(f"⚠️  Haar cascade not found on system. Downloading to {local_path}...")
-        url = f"https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/{local_path}"
-        try:
-            import urllib.request
-            urllib.request.urlretrieve(url, local_path)
-            print("✓ Downloaded Haar cascade successfully")
-            return local_path
-        except Exception as e:
-            print(f"✗ Failed to download Haar cascade: {e}")
-            return None
-
-    def __init__(self, faces_dir="faces", labels_file="face_labels.json", confidence_threshold=80):
-        """
-        Initialize face recognition handler.
-        
-        Args:
-            faces_dir: Directory containing face database (folder per person)
-            labels_file: JSON file mapping label IDs to names
-            confidence_threshold: Maximum confidence for match (lower = stricter, 50-100 typical)
-        """
-        self.faces_dir = faces_dir
-        self.labels_file = labels_file
-        self.confidence_threshold = confidence_threshold
-        
-        # LBPH recognizer (support both OpenCV 3 and 4)
+        # LBPH recognizer (OpenCV contrib)
         try:
             self.recognizer = cv2.face.LBPHFaceRecognizer_create()
         except AttributeError:
             try:
                 self.recognizer = cv2.face.createLBPHFaceRecognizer()
             except AttributeError:
-                raise ImportError("❌ OpenCV face module is installed but recognizer functions are missing. Try: pip install opencv-contrib-python-headless")
-        
-        # Haar cascade for face detection
-        cascade_path = self._ensure_haar_cascade()
-        if not cascade_path:
-            print("❌ Error: Haar cascade file missing and could not be downloaded.")
-            self.face_cascade = None
-        else:
-            print(f"DEBUG: Using Haar cascade path: {cascade_path}")
-            self.face_cascade = cv2.CascadeClassifier(cascade_path)
-            
-            if self.face_cascade.empty():
-                print(f"❌ Error: Could not load Haar cascade from {cascade_path}")
-                self.face_cascade = None
-            else:
-                print("✓ Haar cascade loaded successfully")
-        
+                raise ImportError("❌ OpenCV face module missing. Install opencv-contrib or python3-opencv.")
+
+        # Detector (DNN preferred, Haar fallback)
+        self.detector = FaceDetector()
+
         # Label mappings
-        self.label_to_name = {}  # {0: "ram", 1: "sita", ...}
-        self.name_to_label = {}  # {"ram": 0, "sita": 1, ...}
-        
+        self.label_to_name: Dict[int, str] = {}
+        self.name_to_label: Dict[str, int] = {}
+
         # Load face database
         self._load_face_database()
-    
-    def _load_face_database(self):
-        """
-        Load and train LBPH recognizer from directory structure.
-        
-        Directory structure:
-        faces/
-         ├── ram/
-         │    ├── img1.jpg
-         │    └── img2.jpg
-         ├── sita/
-         │    └── img1.jpg
-         └── teacher/
-              └── img1.jpg
-        """
+
+    def _load_face_database(self) -> None:
+        """Load and train LBPH recognizer from directory structure."""
         if not os.path.exists(self.faces_dir):
-            print(f"⚠️  Face database directory '{self.faces_dir}' not found. Creating it...")
+            print(f"WARN: Face database directory '{self.faces_dir}' not found. Creating it...")
             os.makedirs(self.faces_dir)
-            print(f"✓ Created {self.faces_dir}. Add face images in person-named folders.")
+            print(f"OK: Created {self.faces_dir}. Add face images in person-named folders.")
             return
-        
+
         faces = []
         labels = []
         current_label = 0
-        
-        # Iterate through person folders
+
         for person_name in sorted(os.listdir(self.faces_dir)):
             person_path = os.path.join(self.faces_dir, person_name)
-            
-            # Skip if not a directory
             if not os.path.isdir(person_path):
                 continue
-            
-            # Assign label to this person
+
             self.label_to_name[current_label] = person_name
             self.name_to_label[person_name] = current_label
-            
+
             person_face_count = 0
-            
-            # Load all images for this person
             for image_file in os.listdir(person_path):
-                if not image_file.lower().endswith(('.jpg', '.jpeg', '.png')):
+                if not image_file.lower().endswith((".jpg", ".jpeg", ".png")):
                     continue
-                
+
                 image_path = os.path.join(person_path, image_file)
-                
                 try:
-                    # Load image in grayscale
-                    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-                    
+                    image = cv2.imread(image_path)
                     if image is None:
-                        print(f"  ⚠️  Could not load {person_name}/{image_file}")
+                        print(f"  WARN: Could not load {person_name}/{image_file}")
                         continue
-                    
-                    # Detect faces
-                    detected_faces = self.face_cascade.detectMultiScale(
-                        image,
-                        scaleFactor=1.1,
-                        minNeighbors=5,
-                        minSize=(30, 30)
-                    )
-                    
+
+                    detected_faces = self.detector.detect(image)
                     if len(detected_faces) == 0:
-                        print(f"  ⚠️  No face found in {person_name}/{image_file}")
+                        print(f"  WARN: No face found in {person_name}/{image_file}")
                         continue
-                    
                     if len(detected_faces) > 1:
-                        print(f"  ⚠️  Multiple faces in {person_name}/{image_file}, using first")
-                    
-                    # Extract face region
+                        print(f"  WARN: Multiple faces in {person_name}/{image_file}, using first")
+
                     x, y, w, h = detected_faces[0]
-                    face_roi = image[y:y+h, x:x+w]
-                    
-                    # Resize to standard size for consistency
-                    face_roi = cv2.resize(face_roi, (100, 100))
-                    
-                    faces.append(face_roi)
+                    face_roi = image[y:y + h, x:x + w]
+                    face_gray = cv2.cvtColor(face_roi, cv2.COLOR_BGR2GRAY)
+                    face_gray = cv2.resize(face_gray, (100, 100))
+
+                    faces.append(face_gray)
                     labels.append(current_label)
                     person_face_count += 1
-                    print(f"  ✓ Loaded {person_name}/{image_file}")
-                
+                    print(f"  OK: Loaded {person_name}/{image_file}")
                 except Exception as e:
-                    print(f"  ✗ Error loading {person_name}/{image_file}: {e}")
-            
+                    print(f"  WARN: Error loading {person_name}/{image_file}: {e}")
+
             if person_face_count > 0:
                 current_label += 1
             else:
-                # Remove label if no valid faces loaded
                 del self.label_to_name[current_label]
                 del self.name_to_label[person_name]
-        
-        # Train the recognizer
+
         if len(faces) > 0:
             print(f"  Training LBPH recognizer with {len(faces)} face samples...")
             self.recognizer.train(faces, np.array(labels))
-            print(f"✓ Face database loaded: {len(faces)} faces for {len(self.label_to_name)} people")
-            
-            # Save labels mapping
+            print(f"OK: Face database loaded: {len(faces)} faces for {len(self.label_to_name)} people")
             self._save_labels()
         else:
-            print("⚠️  No faces loaded. Add images to faces/<person_name>/ folders.")
-    
-    def _save_labels(self):
-        """Save label-to-name mapping to JSON file."""
+            print("WARN: No faces loaded. Add images to faces/<person_name>/ folders.")
+
+    def _save_labels(self) -> None:
         try:
-            with open(self.labels_file, 'w') as f:
+            with open(self.labels_file, "w") as f:
                 json.dump(self.label_to_name, f, indent=2)
         except Exception as e:
-            print(f"  ⚠️  Could not save labels: {e}")
-    
+            print(f"WARN: Could not save labels: {e}")
+
     def recognize(self, image_path: str) -> str:
-        """
-        Recognize faces in a single captured image.
-        
-        Args:
-            image_path: Path to image file
-            
-        Returns:
-            Human-readable result string for TTS
-        """
+        """Recognize faces in a single captured image."""
         try:
-            # Check if we have any known faces
             if len(self.label_to_name) == 0:
                 return "No faces enrolled in the database. Please add faces to the faces folder."
-            
-            # Load image
+
             image = cv2.imread(image_path)
             if image is None:
                 return "Sorry, I could not load the image."
-            
-            # Convert to grayscale
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            
-            # Resize if too large (max width 640px for Pi Zero performance)
-            height, width = gray.shape[:2]
+
+            # Resize for speed on Pi
+            height, width = image.shape[:2]
             if width > 640:
                 scale = 640 / width
                 new_width = 640
                 new_height = int(height * scale)
-                gray = cv2.resize(gray, (new_width, new_height))
-            
-            # Detect faces
-            print("  Detecting faces...")
-            detected_faces = self.face_cascade.detectMultiScale(
-                gray,
-                scaleFactor=1.1,
-                minNeighbors=5,
-                minSize=(30, 30)
-            )
-            
+                image = cv2.resize(image, (new_width, new_height))
+
+            detected_faces = self.detector.detect(image)
             if len(detected_faces) == 0:
                 return "I don't see any faces in front of you."
-            
-            print(f"  Found {len(detected_faces)} face(s), recognizing...")
-            
-            # Identify each face
+
             identified_people = []
             unknown_count = 0
-            
+
             for (x, y, w, h) in detected_faces:
-                # Extract face region
-                face_roi = gray[y:y+h, x:x+w]
-                face_roi = cv2.resize(face_roi, (100, 100))
-                
-                # Predict using LBPH
+                face_roi = image[y:y + h, x:x + w]
+                face_gray = cv2.cvtColor(face_roi, cv2.COLOR_BGR2GRAY)
+                face_gray = cv2.resize(face_gray, (100, 100))
+
                 try:
-                    label, confidence = self.recognizer.predict(face_roi)
-                    
-                    # Lower confidence = better match in LBPH
+                    label, confidence = self.recognizer.predict(face_gray)
                     if confidence <= self.confidence_threshold:
                         name = self.label_to_name.get(label, "Unknown")
-                        print(f"  ✓ Recognized: {name} (confidence: {confidence:.1f})")
-                        
-                        # Avoid duplicates
                         if name not in identified_people:
                             identified_people.append(name)
                     else:
-                        print(f"  ? Unknown person (confidence: {confidence:.1f} > threshold {self.confidence_threshold})")
                         unknown_count += 1
-                        
-                except Exception as e:
-                    print(f"  ✗ Recognition error: {e}")
+                except Exception:
                     unknown_count += 1
-            
-            # Format result
+
             return self._format_result(identified_people, unknown_count)
-        
-        except Exception as e:
-            print(f"✗ Face recognition error: {e}")
-            import traceback
-            traceback.print_exc()
+        except Exception:
             return "Sorry, face recognition failed. Please try again."
-    
+
     def recognize_from_bytes(self, image_bytes: bytes) -> str:
-        """
-        Recognize faces from image bytes (from camera handler).
-        
-        Args:
-            image_bytes: JPEG image bytes
-            
-        Returns:
-            Human-readable result string for TTS
-        """
         import tempfile
-        
-        # Save to temp file
-        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
             tmp.write(image_bytes)
             tmp_path = tmp.name
-        
         try:
-            result = self.recognize(tmp_path)
+            return self.recognize(tmp_path)
         finally:
-            # Clean up temp file
             try:
                 os.remove(tmp_path)
-            except:
+            except Exception:
                 pass
-        
-        return result
-    
+
     def _format_result(self, identified: List[str], unknown_count: int) -> str:
-        """
-        Format recognition result into natural language.
-        
-        Args:
-            identified: List of recognized people names
-            unknown_count: Number of unknown faces
-            
-        Returns:
-            Human-readable description
-        """
         if len(identified) == 0 and unknown_count == 0:
             return "I don't see any faces."
-        
         if len(identified) == 0 and unknown_count > 0:
-            if unknown_count == 1:
-                return "I see one person, but I don't recognize them."
-            else:
-                return f"I see {unknown_count} people, but I don't recognize any of them."
-        
-        # Build response for known people
+            return "I see one person, but I don't recognize them." if unknown_count == 1 \
+                else f"I see {unknown_count} people, but I don't recognize any of them."
+
         if len(identified) == 1:
             response = f"I see {identified[0]}"
         elif len(identified) == 2:
             response = f"I see {identified[0]} and {identified[1]}"
         else:
             response = "I see " + ", ".join(identified[:-1]) + f", and {identified[-1]}"
-        
-        # Add unknown people
+
         if unknown_count == 1:
             response += ", and one person I don't recognize"
         elif unknown_count > 1:
             response += f", and {unknown_count} people I don't recognize"
-        
-        response += "."
-        
-        return response
-    
+
+        return response + "."
+
     def get_enrolled_people(self) -> List[str]:
-        """Get list of enrolled people (unique names)."""
         return list(self.label_to_name.values())
-    
+
     def get_stats(self) -> Dict:
-        """Get face database statistics."""
         return {
-            'unique_people': len(self.label_to_name),
-            'people': self.get_enrolled_people()
+            "unique_people": len(self.label_to_name),
+            "people": self.get_enrolled_people()
         }
-    
-    def reload_database(self):
-        """Reload face database (call after adding new faces)."""
+
+    def reload_database(self) -> None:
         self.label_to_name = {}
         self.name_to_label = {}
-        
-        # Re-initialize recognizer
         try:
             self.recognizer = cv2.face.LBPHFaceRecognizer_create()
         except AttributeError:
             self.recognizer = cv2.face.createLBPHFaceRecognizer()
-            
         self._load_face_database()

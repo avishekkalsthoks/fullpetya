@@ -1,0 +1,17 @@
+[Unit]
+Description=Smart Vision Guide (Assistive Vision)
+After=network-online.target bluetooth.service
+Wants=network-online.target bluetooth.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/smart-vision-guide
+EnvironmentFile=/home/pi/smart-vision-guide/.env
+ExecStartPre=-/home/pi/smart-vision-guide/scripts/bt_autoconnect.sh
+ExecStart=/home/pi/smart-vision-guide/venv/bin/python3 /home/pi/smart-vision-guide/main.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

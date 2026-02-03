@@ -27,12 +27,18 @@ import os
 import gc  # Garbage collection for memory optimization
 from config import (
     BUTTON_MODE_PIN, BUTTON_SELECT_PIN,
-    CAMERA_WIDTH, CAMERA_HEIGHT, TTS_BACKEND,
-    ANALYSIS_TIMEOUT
+    CAMERA_WIDTH, CAMERA_HEIGHT,
+    TTS_BACKEND, TTS_RATE, TTS_VOICE, USE_BLUETOOTH_AUDIO,
+    ANALYSIS_TIMEOUT, LOCAL_VISION_ONLY,
+    FACE_DB_DIR, FACE_CONFIDENCE_THRESHOLD,
+    SEARCH_DEFAULT_QUERY, STT_BACKEND,
+    ENABLE_GARBAGE_COLLECTION
 )
 from handlers.camera_handler import CameraHandler
 from handlers.audio_handler import AudioHandler
 from handlers.ai_handler import AIHandler
+from handlers.local_vision_handler import LocalVisionHandler
+from handlers.speech_handler import SpeechHandler
 
 try:
     import RPi.GPIO as GPIO
@@ -97,32 +103,59 @@ class SmartVision:
             raise
         
         try:
-            self.audio = AudioHandler(backend=TTS_BACKEND)
+            self.audio = AudioHandler(
+                backend=TTS_BACKEND,
+                use_bluetooth=USE_BLUETOOTH_AUDIO,
+                rate=TTS_RATE,
+                voice=TTS_VOICE
+            )
             print("✓ Audio handler initialized")
         except Exception as e:
             print(f"✗ Audio initialization failed: {e}")
             raise
         
-        # Initialize AI handler (may fail if not configured)
+        # Initialize AI handler (online)
         try:
             self.ai = AIHandler()
-            print("✓ AI handler initialized")
+            print("✓ AI handler initialized (online)")
         except Exception as e:
             print(f"⚠️  AI service not configured: {e}")
-            print("   Describe, OCR, and Search modes will not work.")
-            print("   Please set OPENROUTER_API_KEY in .env file.")
+            print("   Online analysis unavailable. Offline fallback will be used.")
             self.ai = None
+
+        # Initialize local vision handler (offline)
+        try:
+            self.local_vision = LocalVisionHandler()
+            local_status = self.local_vision.get_status()
+            print(f"✓ Local vision initialized (object detector: {local_status['object_detector']}, OCR: {local_status['ocr']})")
+        except Exception as e:
+            print(f"⚠️  Local vision not available: {e}")
+            self.local_vision = None
+
+        # Initialize speech handler (offline STT for search)
+        try:
+            if STT_BACKEND.lower() != 'none':
+                self.speech = SpeechHandler(audio_handler=self.audio)
+                print("✓ Speech handler initialized")
+            else:
+                self.speech = None
+        except Exception as e:
+            print(f"⚠️  Speech handler not available: {e}")
+            self.speech = None
         
         # Initialize face handler (local offline recognition)
         try:
             from handlers.face_recognition_handler import FaceRecognitionHandler
-            self.face = FaceRecognitionHandler(faces_dir='faces')
+            self.face = FaceRecognitionHandler(
+                faces_dir=FACE_DB_DIR,
+                confidence_threshold=FACE_CONFIDENCE_THRESHOLD
+            )
             stats = self.face.get_stats()
             print(f"✓ Local face recognition initialized: {stats['unique_people']} people enrolled")
         except Exception as e:
             print(f"⚠️  Face recognition not available: {e}")
             print("   Face mode will not work.")
-            print("   Please ensure python3-dlib is installed and faces/ folder exists.")
+            print("   Please ensure python3-opencv with face module is installed and faces/ folder exists.")
             self.face = None
         
         # Setup GPIO
@@ -236,13 +269,8 @@ class SmartVision:
                     self.audio.say("Search cancelled.")
                     return
             
-            # Check if required service is available
-            if mode in ['describe', 'ocr', 'search'] and not self.ai:
-                self.audio.say("Analysis service is not configured. Please set up Hugging Face API credentials.")
-                return
-            
             if mode == 'face' and not self.face:
-                self.audio.say("Face recognition is not configured. Please set up Face++ API credentials.")
+                self.audio.say("Face recognition is not configured.")
                 return
             
             # Capture image with progress feedback
@@ -276,7 +304,7 @@ class SmartVision:
             if mode == 'face':
                 self._process_face_mode(img)
             else:
-                self._process_ai_mode(img, mode, query)
+                self._process_vision_mode(img, mode, query)
             
             # Cancel watchdog
             watchdog_triggered.set()
@@ -285,7 +313,8 @@ class SmartVision:
             print(f"✓ Analysis completed in {analysis_time:.1f}s")
             
             # Trigger garbage collection to free memory
-            gc.collect()
+            if ENABLE_GARBAGE_COLLECTION:
+                gc.collect()
                 
         except Exception as e:
             print(f'✗ Error during analysis: {e}')
@@ -312,31 +341,50 @@ class SmartVision:
             traceback.print_exc()
             self.audio.say("Sorry, face recognition failed. Please try again.")
 
-    def _process_ai_mode(self, image_bytes, mode, query=None):
-        """Process AI-based modes (describe, OCR, search)."""
-        if not self.ai:
-            self.audio.say("Analysis service is not configured.")
+    def _process_vision_mode(self, image_bytes, mode, query=None):
+        """Process AI-based modes with offline fallback."""
+        result = None
+
+        use_online = self.ai is not None and not LOCAL_VISION_ONLY
+        if use_online:
+            self.audio.say("Analyzing online. Please wait.")
+
+            def progress_callback(message):
+                print(f"Progress: {message}")
+
+            try:
+                success, result = self.ai.analyze_image(
+                    image_bytes,
+                    mode=mode,
+                    query=query,
+                    progress_callback=progress_callback,
+                    return_status=True
+                )
+                if success:
+                    self.audio.say(result)
+                    return
+                print("⚠️  Online analysis failed, falling back to offline.")
+            except Exception as e:
+                print(f"⚠️  Online analysis error: {e}")
+
+        # Offline fallback
+        if not self.local_vision:
+            self.audio.say("Offline analysis is not available. Please check configuration.")
             return
-        
-        self.audio.say("Analyzing. Please wait.")
-        
-        # Progress callback for long operations
-        def progress_callback(message):
-            print(f"Progress: {message}")
-        
-        try:
-            result = self.ai.analyze_image(
-                image_bytes, 
-                mode=mode, 
-                query=query,
-                progress_callback=progress_callback
-            )
-            self.audio.say(result)
-            
-        except Exception as e:
-            print(f"✗ AI analysis error: {e}")
-            traceback.print_exc()
-            self.audio.say("Sorry, the analysis failed. Please check your internet connection and try again.")
+
+        self.audio.say("Using offline analysis.")
+        if mode == 'describe':
+            result = self.local_vision.describe_scene(image_bytes)
+        elif mode == 'ocr':
+            result = self.local_vision.ocr_text(image_bytes)
+        elif mode == 'search':
+            if not query:
+                query = SEARCH_DEFAULT_QUERY
+            result = self.local_vision.search_object(image_bytes, query)
+        else:
+            result = "Unsupported mode."
+
+        self.audio.say(result)
 
     def _get_search_query(self):
         """
@@ -353,19 +401,22 @@ class SmartVision:
         # Announce and switch to chat mode for microphone access
         self.audio.say("Listening. What should I search for?")
         self.audio.switch_bluetooth_profile('chat')
-        
-        # For demonstration, return a default query
-        # In production, replace with actual speech recognition
-        # For now, we'll search for "person" as a fallback
-        time.sleep(2)  # Simulate listening time
-        query = "person"
-        
-        # Switch back to music mode to save RAM and restore quality
-        self.audio.switch_bluetooth_profile('music')
-        
+
+        query = None
+        try:
+            if self.speech:
+                query = self.speech.listen()
+        finally:
+            # Switch back to music mode to save RAM and restore quality
+            self.audio.switch_bluetooth_profile('music')
+
+        if not query:
+            query = SEARCH_DEFAULT_QUERY
+            self.audio.say(f"I didn't catch that. Searching for {query}.")
+        else:
+            self.audio.say(f"Searching for {query}.")
+
         print(f"🎤 Heard: {query}")
-        self.audio.say(f"Searching for {query}")
-        
         return query
 
     def _shutdown(self):

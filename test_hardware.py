@@ -16,6 +16,7 @@ except ImportError:
 
 from handlers.camera_handler import CameraHandler
 from handlers.audio_handler import AudioHandler
+from handlers.local_vision_handler import LocalVisionHandler
 from config import (
     BUTTON_MODE_PIN, BUTTON_SELECT_PIN
 )
@@ -280,23 +281,37 @@ def test_face_recognition():
         return False
 
 
-def test_huggingface():
-    """Test Hugging Face API connection."""
-    print("\n=== Testing Hugging Face API ===")
+def test_openrouter():
+    """Test OpenRouter API connection."""
+    print("\n=== Testing OpenRouter API ===")
     
     try:
         from handlers.ai_handler import AIHandler
         ai = AIHandler()
         
-        print(f"✓ Hugging Face API configured")
+        print(f"✓ OpenRouter API configured")
         
         return True
         
     except RuntimeError as e:
-        print(f"⚠️  Hugging Face API not configured: {e}")
+        print(f"⚠️  OpenRouter API not configured: {e}")
         return False
     except Exception as e:
-        print(f"✗ Hugging Face API test failed: {e}")
+        print(f"✗ OpenRouter API test failed: {e}")
+        return False
+
+
+def test_local_vision():
+    """Test offline local vision availability."""
+    print("\n=== Testing Local Vision (Offline) ===")
+    try:
+        local = LocalVisionHandler()
+        status = local.get_status()
+        print(f"✓ Local object detector: {status['object_detector']}")
+        print(f"✓ Local OCR (Tesseract): {status['ocr']}")
+        return True
+    except Exception as e:
+        print(f"⚠️  Local vision not available: {e}")
         return False
 
 
@@ -339,7 +354,8 @@ def main():
     results['Camera'] = test_camera()
     results['Audio'] = test_audio()
     results['Local Face Recognition'] = test_face_recognition()
-    results['Hugging Face API'] = test_huggingface()
+    results['Local Vision (Offline)'] = test_local_vision()
+    results['OpenRouter API'] = test_openrouter()
     
     # Print summary
     print("\n" + "=" * 60)

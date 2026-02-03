@@ -19,23 +19,41 @@ class AudioHandler:
         'search': 'search_mode.wav'
     }
     
-    def __init__(self, backend='espeak', use_bluetooth=True):
+    def __init__(self, backend='auto', use_bluetooth=True, rate=120, voice='en-us+f3'):
         """
         Initialize audio handler.
         
         Args:
-            backend: TTS backend ('espeak' for offline, 'gtts' for online)
+            backend: TTS backend ('pico2wave', 'espeak-ng', 'espeak', 'gtts', or 'auto')
             use_bluetooth: Whether to route audio through Bluetooth (via PulseAudio)
+            rate: TTS speaking rate
+            voice: TTS voice (espeak/espeak-ng)
         """
         self.backend = backend
         self.use_bluetooth = use_bluetooth
+        self.rate = rate
+        self.voice = voice
+        self.backend = self._resolve_backend(self.backend)
         self._test_audio_system()
+
+    def _resolve_backend(self, backend: str) -> str:
+        """Resolve 'auto' backend to best available local option."""
+        if backend and backend != 'auto':
+            return backend
+
+        if shutil.which('pico2wave') and shutil.which('aplay'):
+            return 'pico2wave'
+        if shutil.which('espeak-ng'):
+            return 'espeak-ng'
+        if shutil.which('espeak'):
+            return 'espeak'
+        return 'gtts'
 
     def _test_audio_system(self):
         """Test audio system availability."""
-        # Check if espeak is available
-        if not shutil.which('espeak'):
-            print("⚠️  Warning: espeak not found. TTS may not work.")
+        # Check if any offline TTS is available
+        if not shutil.which('pico2wave') and not shutil.which('espeak-ng') and not shutil.which('espeak'):
+            print("⚠️  Warning: No offline TTS engine found.")
         
         # Check PulseAudio for Bluetooth
         if self.use_bluetooth:
@@ -113,21 +131,34 @@ class AudioHandler:
                     print(f"gTTS error: {e}, falling back to espeak")
                     # Fall through to espeak
 
-        # Default: offline espeak (fast, low overhead)
+        # Offline TTS options
+        if self.backend == 'pico2wave':
+            if shutil.which('pico2wave') and shutil.which('aplay'):
+                try:
+                    tmp = '/tmp/speech_pico.wav'
+                    subprocess.run(['pico2wave', '-w', tmp, '-l', 'en-US', text],
+                                   capture_output=True, timeout=30, check=False)
+                    subprocess.run(['aplay', '-q', tmp], capture_output=True, timeout=30, check=False)
+                    try:
+                        os.remove(tmp)
+                    except Exception:
+                        pass
+                    return
+                except Exception as e:
+                    print(f"pico2wave error: {e}, falling back to espeak")
+
+        # Default: offline espeak / espeak-ng
+        engine = 'espeak-ng' if shutil.which('espeak-ng') else 'espeak'
         try:
-            # Reduced speed from 130 to 120 for better clarity on low-quality speakers
-            # Added voice variant for better quality
-            # capture_output=True prevents terminal clutter
             subprocess.run(
-                ['espeak', '-s', '120', '-v', 'en-us+f3', text],
+                [engine, '-s', str(self.rate), '-v', self.voice, text],
                 capture_output=True,
                 timeout=30,
                 check=False
             )
         except subprocess.TimeoutExpired:
-            print(f"espeak timeout for text: {text[:50]}...")
+            print(f"{engine} timeout for text: {text[:50]}...")
         except FileNotFoundError:
-            # Last-resort: print to console
             print(f'🔊 TTS: {text}')
         except Exception as e:
             print(f"Audio error: {e}")
@@ -350,4 +381,19 @@ class AudioHandler:
             return True
         except Exception as e:
             print(f"Error setting default sink: {e}")
+            return False
+
+    def set_default_source(self, source_name):
+        """Set default PulseAudio source for microphone routing."""
+        try:
+            subprocess.run(
+                ['pactl', 'set-default-source', source_name],
+                capture_output=True,
+                timeout=5,
+                check=True
+            )
+            print(f"✓ Set default audio source to: {source_name}")
+            return True
+        except Exception as e:
+            print(f"Error setting default source: {e}")
             return False

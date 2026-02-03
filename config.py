@@ -4,22 +4,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ===============================================
-# API Configuration
+# API Configuration (Online AI)
 # ===============================================
 
-# OpenRouter Configuration (for Describe, OCR, and Search modes)
-OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY', '').strip()
-OPENROUTER_MODEL = os.getenv('OPENROUTER_MODEL', 'allenai/molmo-2-8b:free')
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
-# ===============================================
-# API Configuration
-# ===============================================
-
-# OpenRouter Configuration (for Describe, OCR, and Search modes)
 OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY', '').strip()
 OPENROUTER_MODEL = os.getenv('OPENROUTER_MODEL', 'allenai/molmo-2-8b:free')
 OPENROUTER_API_URL = os.getenv('OPENROUTER_API_URL', 'https://openrouter.ai/api/v1/chat/completions')
@@ -29,29 +16,55 @@ OPENROUTER_SITE_URL = os.getenv('OPENROUTER_SITE_URL', '').strip()
 OPENROUTER_SITE_NAME = os.getenv('OPENROUTER_SITE_NAME', 'Smart Vision Guide').strip()
 
 # ===============================================
-# Local Face Recognition Configuration
+# Local / Offline Vision Configuration
 # ===============================================
 
-# Face database directory (folder per person, multiple images per person)
-FACE_DB_DIR = os.getenv('FACE_DB_DIR', 'faces')
+LOCAL_VISION_ONLY = os.getenv('LOCAL_VISION_ONLY', 'false').lower() == 'true'
+LOCAL_MODEL_DIR = os.getenv('LOCAL_MODEL_DIR', 'models')
 
-# Face recognition distance threshold (0.5-0.6 recommended, lower = stricter)
-FACE_DISTANCE_THRESHOLD = float(os.getenv('FACE_DISTANCE_THRESHOLD', '0.6'))
+# Object detector (MobileNet-SSD, Caffe)
+OBJECT_DNN_PROTO = os.getenv(
+    'OBJECT_DNN_PROTO',
+    os.path.join(LOCAL_MODEL_DIR, 'mobilenet_ssd_deploy.prototxt')
+)
+OBJECT_DNN_MODEL = os.getenv(
+    'OBJECT_DNN_MODEL',
+    os.path.join(LOCAL_MODEL_DIR, 'mobilenet_ssd.caffemodel')
+)
+OBJECT_DNN_CONFIDENCE = float(os.getenv('OBJECT_DNN_CONFIDENCE', '0.45'))
+
+# Offline OCR (Tesseract)
+TESSERACT_CMD = os.getenv('TESSERACT_CMD', '').strip()
+
+# ===============================================
+# Face Recognition Configuration
+# ===============================================
+
+FACE_DB_DIR = os.getenv('FACE_DB_DIR', 'faces')
+FACE_CONFIDENCE_THRESHOLD = int(os.getenv('FACE_CONFIDENCE_THRESHOLD', '80'))
+
+# Face detector (DNN preferred)
+FACE_DNN_PROTO = os.getenv(
+    'FACE_DNN_PROTO',
+    os.path.join(LOCAL_MODEL_DIR, 'face_detector_deploy.prototxt')
+)
+FACE_DNN_MODEL = os.getenv(
+    'FACE_DNN_MODEL',
+    os.path.join(LOCAL_MODEL_DIR, 'face_detector.caffemodel')
+)
+FACE_DNN_CONFIDENCE = float(os.getenv('FACE_DNN_CONFIDENCE', '0.5'))
 
 # ===============================================
 # Performance Tuning for Pi Zero 2W
 # ===============================================
 
-# Network Settings (optimized for slow connections)
 REQUEST_TIMEOUT = int(os.getenv('REQUEST_TIMEOUT', '45'))  # seconds
 RETRY_ATTEMPTS = int(os.getenv('RETRY_ATTEMPTS', '2'))
 RETRY_DELAY = float(os.getenv('RETRY_DELAY', '2.0'))
 
-# Image Processing (reduced for faster processing and smaller payloads)
 IMAGE_MAX_WIDTH = int(os.getenv('IMAGE_MAX_WIDTH', '512'))
 IMAGE_JPEG_QUALITY = int(os.getenv('IMAGE_JPEG_QUALITY', '60'))
 
-# Analysis Timeout (watchdog timer)
 ANALYSIS_TIMEOUT = int(os.getenv('ANALYSIS_TIMEOUT', '60'))
 
 # ===============================================
@@ -74,15 +87,23 @@ CAMERA_RETRY_ATTEMPTS = int(os.getenv('CAMERA_RETRY_ATTEMPTS', '3'))
 # Audio/TTS Settings
 # ===============================================
 
-# TTS options: espeak (offline, recommended) or gtts (online)
-TTS_BACKEND = os.getenv('TTS_BACKEND', 'espeak')
+TTS_BACKEND = os.getenv('TTS_BACKEND', 'auto')
+TTS_RATE = int(os.getenv('TTS_RATE', '120'))
+TTS_VOICE = os.getenv('TTS_VOICE', 'en-us+f3')
 USE_BLUETOOTH_AUDIO = os.getenv('USE_BLUETOOTH_AUDIO', 'true').lower() == 'true'
 
-# Note: This project uses local offline face recognition via `face_recognition` (dlib).
-# Remove any cloud Face++ integrations to keep the codebase minimal for offline use.
+# ===============================================
+# Speech-to-Text Settings (Search Mode)
+# ===============================================
+
+STT_BACKEND = os.getenv('STT_BACKEND', 'auto')  # 'vosk', 'auto', or 'none'
+VOSK_MODEL_PATH = os.getenv('VOSK_MODEL_PATH', os.path.join(LOCAL_MODEL_DIR, 'vosk-model-small-en-us-0.15'))
+VOICE_INPUT_SECONDS = float(os.getenv('VOICE_INPUT_SECONDS', '4'))
+VOICE_INPUT_SAMPLE_RATE = int(os.getenv('VOICE_INPUT_SAMPLE_RATE', '16000'))
+SEARCH_DEFAULT_QUERY = os.getenv('SEARCH_DEFAULT_QUERY', 'person')
 
 # ===============================================
-# Search Mode Configuration
+# Search Mode Configuration (Common objects)
 # ===============================================
 
 SEARCH_OBJECTS = [
@@ -98,7 +119,7 @@ SEARCH_OBJECTS = [
 ]
 
 # ===============================================
-# System Optimization (Pi Zero 2W specific)
+# System Optimization
 # ===============================================
 
 ENABLE_GARBAGE_COLLECTION = os.getenv('ENABLE_GARBAGE_COLLECTION', 'true').lower() == 'true'
@@ -114,16 +135,16 @@ ENABLE_OCR_MODE = os.getenv('ENABLE_OCR_MODE', 'true').lower() == 'true'
 ENABLE_FACE_MODE = os.getenv('ENABLE_FACE_MODE', 'true').lower() == 'true'
 ENABLE_SEARCH_MODE = os.getenv('ENABLE_SEARCH_MODE', 'true').lower() == 'true'
 
-# ===============================================
-# System Information
-# ===============================================
 
 def get_system_info():
     """Get system information for debugging."""
     return {
         'openrouter_configured': bool(OPENROUTER_API_KEY),
         'openrouter_model': OPENROUTER_MODEL,
-        'face_recognition': 'Local (dlib)'
+        'local_vision_only': LOCAL_VISION_ONLY,
+        'local_model_dir': LOCAL_MODEL_DIR,
+        'tts_backend': TTS_BACKEND,
+        'stt_backend': STT_BACKEND
     }
 
 
@@ -135,15 +156,19 @@ if __name__ == '__main__':
     print(f"\n🔧 API Configuration:")
     print(f"  OpenRouter: {'✓ Configured' if info['openrouter_configured'] else '✗ Not configured'}")
     print(f"  Model:      {info['openrouter_model']}")
-    print(f"  Face Recognition: {info['face_recognition']}")
-    print(f"\n📷 Camera Settings:")
+    print(f"\n🧠 Local Vision:")
+    print(f"  Offline Only: {info['local_vision_only']}")
+    print(f"  Model Dir:    {info['local_model_dir']}")
+    print(f"\n🎤 Speech:")
+    print(f"  STT Backend:  {info['stt_backend']}")
+    print(f"\n🔊 Audio:")
+    print(f"  TTS Backend:  {info['tts_backend']}")
+    print(f"\n📷 Camera:")
     print(f"  Resolution:   {CAMERA_WIDTH}x{CAMERA_HEIGHT}")
     print(f"  Warmup:       {CAMERA_WARMUP_FRAMES} frames")
     print(f"\n🌐 Network:")
     print(f"  Timeout:      {REQUEST_TIMEOUT}s")
     print(f"  Retries:      {RETRY_ATTEMPTS}")
-    print(f"\n🔊 Audio:")
-    print(f"  TTS Backend:  {TTS_BACKEND}")
     print(f"\n🎮 Button Configuration:")
     print(f"  Mode Toggle:  GPIO {BUTTON_MODE_PIN}")
     print(f"  Select:       GPIO {BUTTON_SELECT_PIN}")

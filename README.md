@@ -1,383 +1,211 @@
-# Smart Vision Guide (Raspberry Pi Zero 2W - Optimized)
+# Smart Vision Guide (Pi Zero 2W)
 
-An enhanced assistive vision device for visually impaired users, **specifically optimized for Raspberry Pi Zero 2W** with 512MB RAM. Features 4 intelligent modes: scene description, text reading (OCR), face recognition, and object search.
+An assistive vision device optimized for Raspberry Pi Zero 2W (512MB RAM) with **online + offline** vision modes, a simple 2-button interface, and Bluetooth audio support.
 
-## 🎯 Key Optimizations for Pi Zero 2W
+## Highlights
 
-- **Memory-Efficient Installation**: Uses apt packages (NOT pip) for heavy libraries to avoid memory exhaustion
-- **Reduced Image Processing**: Optimized resolution (512x384) and compression (60% JPEG quality) for faster processing
-- **Retry Logic**: Automatic retries for network and API failures
-- **Rate Limiting**: Built-in protection for Face++ API 3 QPS limit
-- **Watchdog Timer**: Prevents hung operations with 60-second timeout
-- **Bluetooth Audio**: Full PulseAudio support for stable Bluetooth headphone connection
+- Works **offline** for all modes using lightweight local models
+- Uses **OpenRouter** online AI for higher quality when internet is available
+- Stronger face detection via OpenCV DNN + local LBPH recognition
+- Offline OCR using Tesseract
+- Search mode voice input with offline STT (Vosk)
+- Pi Zero 2W tuned: reduced image size, low memory defaults
 
-## Features
+## Modes (Online + Offline)
 
-### 4 Operating Modes
+| Mode | Online (OpenRouter) | Offline Fallback |
+|------|----------------------|------------------|
+| Describe | Full scene description | Object summary + positions + distance hints |
+| OCR | Vision OCR | Tesseract OCR |
+| Face | Local LBPH | Local LBPH (always offline) |
+| Search | AI object search | MobileNet-SSD object detection |
 
-| Mode | Description |
-|------|-------------|
-| **Describe** | Describes the scene, objects, and surroundings |
-| **OCR** | Reads visible text (menus, signs, books, labels) |
-| **Face** | Identifies enrolled people in the frame |
-| **Search** | Answers questions about specific objects in view |
+Set `LOCAL_VISION_ONLY=true` in `.env` to **force offline-only** mode.
 
-### Simple 2-Button Interface
+---
 
-**Hardware Controls:**
-- **Button 1 (GPIO 17) - Mode Toggle**: Cycles through modes
-  - Press to cycle: Describe → OCR → Face → Search → Shutdown → (repeat)
-  - Device announces each mode as you cycle
-  
-- **Button 2 (GPIO 27) - Select/Execute**: Runs the current mode
-  - Press to execute the currently selected mode
-  - In shutdown mode: powers off the system
+## How Online vs Offline Works
 
-**Usage Example:**
-1. Press Button 1 until you hear "Text reading mode"
-2. Press Button 2 to capture and read text
+By default, the system **tries online first** and falls back to offline if online fails.
 
-## Quick Start
+- It does **not** specifically check Wi-Fi first.
+- If the online API returns an error or times out, it immediately falls back to offline.
+- If you want **offline-only**, set:
+  ```
+  LOCAL_VISION_ONLY=true
+  ```
 
-### 1. Hardware Setup
+---
 
-Connect **2 tactile push-button switches** to the following GPIO pins:
-```
-Button 1 (Mode Toggle)     → GPIO 17 → Ground
-Button 2 (Select/Execute)  → GPIO 27 → Ground
-```
+## Hardware Requirements
 
-Each button connects between the GPIO pin and Ground. The Pi's internal pull-up resistors are used, so no external resistors are needed.
+- Raspberry Pi Zero 2W (512MB RAM)
+- Raspberry Pi Camera Module (v2 or HQ recommended)
+- 2 tactile push buttons (GPIO 17 + 27)
+- Bluetooth headset/speaker (mic recommended for Search)
+- MicroSD card (16GB+)
 
-### 2. Software Installation
+---
 
-⚠️ **CRITICAL**: This installation method is specifically designed for Pi Zero 2W to avoid memory exhaustion.
+## Quick Start (Pi Zero 2W)
 
-On your Raspberry Pi Zero 2W:
-
+### 1) Install system dependencies
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/smart-vision-guide.git
-cd smart-vision-guide
-
-# Run the optimized setup script (apt-based installation)
 sudo bash setup_system.sh
 ```
 
-**What the setup script does:**
-- Installs numpy, opencv, pillow, pyaudio via **apt** (pre-compiled binaries)
-- Creates venv with `--system-site-packages` to access apt packages
-- Installs only pure-Python packages via pip (requests, dotenv, gTTS)
-- Configures camera driver (bcm2835-v4l2)
-- Sets GPU memory allocation for camera
-- Configures PulseAudio for Bluetooth audio
+### 2) Download local models (offline support)
+```bash
+bash scripts/download_models.sh
+```
 
-**Estimated time**: ~10-15 minutes (vs hours for pip compilation)
-
-### 3. Configuration
-
-Copy the example environment file and fill in your API credentials:
-
+### 3) Configure environment
 ```bash
 cp .env.example .env
 nano .env
 ```
 
-**Required API credentials:**
-
-1. **Hugging Face Token** (for Describe, OCR, Search modes):
-   - Get from: https://huggingface.co/settings/tokens
-   - Free tier: ~few hundred requests/hour
-   - Add to `.env`: `HF_TOKEN=hf_your_token_here`
-
-**Face Recognition** runs fully offline (no API required)!
-
-### 4. Pair Bluetooth Audio
-
-For best experience with Bluetooth headphones/speaker:
-
-```bash
-bluetoothctl
-scan on
-# Find your device address (e.g., AA:BB:CC:DD:EE:FF)
-pair AA:BB:CC:DD:EE:FF
-trust AA:BB:CC:DD:EE:FF
-connect AA:BB:CC:DD:EE:FF
-exit
+Set at least:
+```
+OPENROUTER_API_KEY=your_key_here
+```
+Optional for offline-only:
+```
+LOCAL_VISION_ONLY=true
 ```
 
-The system automatically routes audio to Bluetooth via PulseAudio.
-
-### 5. Test Hardware
-
+### 4) Enroll faces (offline)
 ```bash
 source venv/bin/activate
-python3 test_hardware.py
+python3 enroll_face.py "Alice"
 ```
 
-This will test: Camera, Audio, GPIO buttons, API connections.
-
-### 6. Run the Application
-
+### 5) Run the app
 ```bash
 source venv/bin/activate
 python3 main.py
 ```
 
-## Face Enrollment (Local Offline System)
+---
 
-The face recognition system runs **completely offline** using the `face_recognition` library (dlib HOG detector). No cloud APIs or internet connection required for face mode!
+## Search Mode Voice Input (Microphone)
 
-**Face Database Structure:**
-```
-faces/
- ├── ram/
- │    ├── img1.jpg
- │    ├── img2.jpg
- │    └── img3.jpg
- ├── sita/
- │    └── img1.jpg
- └── teacher/
-      ├── img1.jpg
-      └── img2.jpg
-```
+Search mode uses **offline speech-to-text (Vosk)** by default.
 
-### Enrollment Methods
+Important:
+- Your Bluetooth headset must support **HSP/HFP** (microphone profile)
+- If your headset is output-only, use a **USB microphone**
 
-#### Option 1: Interactive Camera Enrollment (Recommended)
-```bash
-source venv/bin/activate
+The app switches Bluetooth profile automatically between music and chat modes.
 
-# Enroll a new person (captures 3 photos by default)
-python3 enroll_face.py "Ram"
+---
 
-# Capture more photos for better accuracy
-python3 enroll_face.py "Sita" --photos 5
-```
+## Offline Model Notes (Pi Zero 2W Friendly)
 
-Follow prompts to capture multiple photos from different angles.
+These models are chosen to be lightweight and Pi-safe:
 
-#### Option 2: Import from Existing Images
-```bash
-# Enroll from a single image file
-python3 enroll_face.py "Ram" --image path/to/ram.jpg
+- **MobileNet-SSD** (object detection, offline search/describe)
+- **Res10 SSD** (face detection)
+- **LBPH** (face recognition)
+- **Tesseract** (OCR)
+- **Vosk small** (speech-to-text)
 
-# Enroll multiple images manually
-mkdir faces/ram
-cp photo1.jpg faces/ram/img1.jpg
-cp photo2.jpg faces/ram/img2.jpg
-```
+Tesseract **is Pi-friendly** on 512MB RAM, but slower than online OCR.
+Keeping the image resolution at 512x384 makes OCR much faster and safer.
 
-### Managing Enrolled Faces
+---
 
-```bash
-# List all enrolled people
-python3 enroll_face.py --list
+## Auto-Start on Boot
 
-# Remove a person
-python3 enroll_face.py --remove "Ram"
-```
-
-### Tips for Best Results
-- **Multiple photos**: Enroll 3-5 photos per person from different angles
-- **Good lighting**: Ensure face is well-lit
-- **Clear face**: No sunglasses, hats, or obstructions
-- **One person per photo**: Enrollment works best with single-person photos
-- **Similar conditions**: Enroll photos similar to usage conditions
-
-## Project Structure
-
-```
-smart-vision-guide/
-├── main.py                           # Main application (2-button interface)
-├── config.py                         # Configuration (Pi Zero tuned)
-├── requirements.txt                   # Pure-Python dependencies only
-├── setup_system.sh                    # Apt-based setup script (CRITICAL)
-├── .env.example                       # Example environment configuration
-├── faces/                             # Local face database (folder per person)
-│   ├── person1/
-│   │    ├── img1.jpg
-│   │    └── img2.jpg
-│   └── person2/
-│        └── img1.jpg
-├── handlers/
-│   ├── camera_handler.py              # Camera with retry logic and warmup
-│   ├── audio_handler.py               # TTS with PulseAudio Bluetooth support
-│   ├── ai_handler.py                  # HuggingFace with retry and caching
-│   └── face_recognition_handler.py    # Local offline face recognition (dlib HOG)
-├── test_hardware.py                   # Hardware test suite
-├── enroll_face.py                     # Face enrollment utility
-├── scripts/
-│   └── reduce_memory.sh               # Memory optimization script
-└── README.md                          # This file
-```
-
-## Performance
-
-| Mode | Typical Latency | Notes |
-|------|-----------------|-------|
-| Describe | 5-10 seconds | Includes capture + network + processing |
-| OCR | 4-8 seconds | Depends on text amount |
-| Face | 2-4 seconds | **Offline, no network required** |
-| Search | 5-9 seconds | Depends on query complexity |
-
-*Latency for AI modes includes retry attempts. Face mode is purely local.*
-
-## Troubleshooting
-
-### Camera not working
-
-```bash
-# Enable camera interface
-sudo raspi-config
-# Interface Options → Camera → Enable
-sudo reboot
-
-# Manually load driver
-sudo modprobe bcm2835-v4l2
-
-# Test camera
-vcgencmd get_camera
-# Should show: supported=1 detected=1
-```
-
-### No audio output / Bluetooth stuttering
-
-```bash
-# Check PulseAudio status
-pactl info
-
-# List audio sinks
-pactl list short sinks
-
-# Check Bluetooth connection
-bluetoothctl devices
-bluetoothctl info AA:BB:CC:DD:EE:FF
-
-# Restart PulseAudio
-pulseaudio -k
-pulseaudio --start
-```
-
-**Known Issue**: Pi Zero 2W has Bluetooth/WiFi coexistence issues.
-**Solution**: Reduce WiFi activity or use USB Bluetooth dongle.
-
-### Out of Memory errors
-
-```bash
-# Check memory usage
-free -h
-
-# Monitor during operation
-htop
-
-# Check swap
-sudo swapon --show
-
-# Create/increase swap if needed
-sudo dphys-swapfile swapoff
-sudo nano /etc/dphys-swapfile  # Set CONF_SWAPSIZE=512
-sudo dphys-swapfile setup
-sudo dphys-swapfile swapon
-```
-
-### Face recognition not working
-
-1. Verify dlib is installed: `python3 -c "import face_recognition; print('OK')"`
-2. Check faces directory exists: `ls -la faces/`
-3. Enroll at least one person: `python3 enroll_face.py "Name"`
-4. Ensure good image quality (clear face, good lighting)
-5. **No internet required** - works completely offline
-
-### API timeout errors
-
-1. Check internet connection: `ping 8.8.8.8`
-2. Increase timeout in config.py: `REQUEST_TIMEOUT = 60`
-3. Check API status:
-   - HuggingFace: https://status.huggingface.co
-   - Face++: https://www.faceplusplus.com
-
-### Import errors after installation
-
-If you see "ModuleNotFoundError" for opencv/numpy:
-
-```bash
-# Verify apt packages are installed
-dpkg -l | grep python3-opencv
-dpkg -l | grep python3-numpy
-
-# Check venv has system-site-packages
-source venv/bin/activate
-python3 -c "import sys; print('system-site-packages' in sys.path)"
-# Should print True
-```
-
-## Hardware Requirements
-
-- **Raspberry Pi Zero 2W** (512MB RAM)
-- Raspberry Pi Camera Module (v2 or HQ recommended)
-- **2x Tactile push-button switches** (momentary contact)
-- Bluetooth speaker/headphones OR USB audio output
-- MicroSD card (16GB+ recommended, Class 10)
-- Power supply (2.5A recommended for stability)
-
-## System Requirements
-
-- Raspbian Buster / Legacy (or newer)
-- Internet connection (required for AI analysis)
-- ~500MB free disk space after installation
-
-## Installation as System Service (Optional)
-
-To run automatically on boot:
+Use the included systemd service file:
 
 ```bash
 sudo cp smart-vision.service /etc/systemd/system/
 sudo systemctl enable smart-vision
 sudo systemctl start smart-vision
-
-# Check status
-sudo systemctl status smart-vision
-
-# View logs
-sudo journalctl -u smart-vision -f
 ```
 
-## Memory Optimization Tips
-
-1. **Use espeak** instead of gTTS for offline TTS (saves bandwidth and time)
-2. **Close other applications** when running
-3. **Monitor temperature**: `vcgencmd measure_temp` (should stay < 70°C)
-4. **Reduce camera resolution** if needed (edit `config.py`)
-5. **Enable swap** if experiencing OOM crashes
-
-## Known Limitations
-
-1. **Internet Required for AI modes**: Describe, OCR, Search require active internet (Face mode works offline)
-2. **Bluetooth Issues**: Pi Zero 2W has known WiFi/BT interference
-3. **Processing Speed**: Slower than Pi 4 due to limited CPU/RAM
-4. **Single Operation**:Only one analysis at a time (enforced by application)
-5. **Face Recognition**: Accuracy depends on enrollment photo quality and lighting conditions
-
-## License
-
-MIT License - See LICENSE file for details.
-
-## Acknowledgments
-
-- Hugging Face for the Inference API and Molmo2 model
-- Face++ for the face recognition API  
-- The Raspberry Pi Foundation
-- The assistive technology community
-
-## Support
-
-For issues specific to Pi Zero 2W optimization, check:
-1. Logs: `sudo journalctl -u smart-vision -f`
-2. Memory: `free -h` and `htop`
-3. Temperature: `vcgencmd measure_temp`
-4. Camera: `vcgencmd get_camera`
+Important: edit `smart-vision.service` to match your installation path.
+Default path assumes:
+```
+/home/pi/smart-vision-guide
+```
 
 ---
 
-**Optimized for Pi Zero 2W** - v2.0
+## Auto-Connect Wi-Fi and Bluetooth
+
+### Wi-Fi
+Wi-Fi auto-connect is handled by the OS. Use:
+```bash
+sudo raspi-config
+```
+Then set your network in the OS network settings.
+
+### Bluetooth
+Pair + trust your headset once:
+```bash
+bluetoothctl
+scan on
+pair AA:BB:CC:DD:EE:FF
+trust AA:BB:CC:DD:EE:FF
+connect AA:BB:CC:DD:EE:FF
+```
+
+Optional auto-connect script:
+```bash
+BT_DEVICE_MAC=AA:BB:CC:DD:EE:FF bash scripts/bt_autoconnect.sh
+```
+
+The systemd service can run this automatically on boot.
+
+---
+
+## Face Enrollment
+
+```bash
+source venv/bin/activate
+python3 enroll_face.py "Alice" --photos 5
+```
+
+Faces are stored in:
+```
+faces/<name>/img1.jpg
+faces/<name>/img2.jpg
+```
+
+---
+
+## Tuning and Tips
+
+- For clearer speech, use:
+  - `TTS_BACKEND=auto` (pico2wave -> espeak-ng -> espeak)
+  - Adjust `TTS_RATE` and `TTS_VOICE`
+- If you want offline only, set:
+  - `LOCAL_VISION_ONLY=true`
+- If Search speech input is unreliable:
+  - Use a USB mic or ensure HSP/HFP profile is supported
+
+---
+
+## Troubleshooting
+
+**No offline objects detected**
+- Ensure models downloaded: `bash scripts/download_models.sh`
+
+**OCR not working**
+- Confirm Tesseract installed: `tesseract --version`
+
+**Search mode hears nothing**
+- Ensure microphone is available: `arecord -l`
+- Try a USB mic or headset with HSP/HFP
+
+**Face recognition poor**
+- Enroll 3-5 photos in good lighting
+- Ensure faces are centered and clear
+
+---
+
+## License
+
+MIT License

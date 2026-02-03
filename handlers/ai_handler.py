@@ -92,22 +92,22 @@ class AIHandler:
         # Enhanced prompts for better assistive experience
         prompts = {
             'describe': (
-                "You are helping a blind person. Describe this image concisely. "
-                "Focus on: main subject, what's happening, location/setting, "
-                "important objects, colors, and spatial relationships. "
-                "Keep it brief - 2 to 3 sentences maximum. Describe:"
+                "You are assisting a blind person. Describe the scene in 2 to 3 short sentences. "
+                "Mention people, key objects, and any obstacles. "
+                "Give relative positions (left, center, right) and approximate distance "
+                "in steps or arm-lengths when possible. Be concise and actionable."
             ),
             'ocr': (
                 "You are reading text for a visually impaired person. "
                 "Extract ONLY the visible text in this image. "
-                "Preserve layout if it's a menu or sign. "
-                "If no text, say 'No text detected.' Read:"
+                "Preserve line breaks if it's a menu, sign, or label. "
+                "If no text, say 'No text detected.'"
             ),
             'search': (
-                f"You are helping a blind person find things. "
-                f"Look at this image and identify objects you see. "
-                f"Common items: {', '.join(SEARCH_OBJECTS[:12])}. "
-                f"List main objects clearly and briefly. What's in this image:"
+                f"You are helping a blind person find objects. "
+                f"List the main objects you see and include their approximate position "
+                f"(left/center/right) and distance (near/far). "
+                f"Common items include: {', '.join(SEARCH_OBJECTS[:12])}."
             )
         }
         
@@ -117,10 +117,10 @@ class AIHandler:
         if mode == 'search' and query:
             prompt = (
                 f"You are helping a blind person search for '{query}'. "
-                f"Look carefully. If you see '{query}' or something similar, "
-                f"confirm it clearly and describe its location. "
-                f"If not present, briefly say what you do see. "
-                f"Is '{query}' in this image:"
+                f"If you see '{query}', say yes and give its position (left/center/right) "
+                f"and approximate distance in steps or arm-lengths. "
+                f"If you do not see it, say no and briefly mention the most important objects. "
+                f"Be concise and clear."
             )
         
         # OpenRouter chat completions format with image_url
@@ -147,7 +147,7 @@ class AIHandler:
             "temperature": 0.7
         }
 
-    def analyze_image(self, image_bytes: bytes, mode: str = 'describe', query: str = None, progress_callback=None) -> str:
+    def analyze_image(self, image_bytes: bytes, mode: str = 'describe', query: str = None, progress_callback=None, return_status: bool = False):
         """
         Sends image to OpenRouter API and returns the generated text.
         
@@ -210,6 +210,8 @@ class AIHandler:
                 # Clean up and format the response
                 formatted = self._format_response(generated_text, mode, query)
                 self.last_successful_response = formatted  # Cache for fallback
+                if return_status:
+                    return True, formatted
                 return formatted
                     
             except requests.exceptions.Timeout:
@@ -219,24 +221,29 @@ class AIHandler:
                     continue
                 # Return cached response if available
                 if self.last_successful_response:
-                    return "The analysis is taking too long. Here's what I saw last time: " + self.last_successful_response
-                return "The analysis timed out. Please check your internet connection and try again."
+                    msg = "The analysis is taking too long. Here's what I saw last time: " + self.last_successful_response
+                    return (False, msg) if return_status else msg
+                msg = "The analysis timed out. Please check your internet connection and try again."
+                return (False, msg) if return_status else msg
                 
             except requests.exceptions.ConnectionError:
                 print(f"Connection error (attempt {attempt + 1}/{self.retry_attempts + 1})")
                 if attempt < self.retry_attempts:
                     time.sleep(self.retry_delay)
                     continue
-                return "I couldn't connect to the analysis service. Please check your internet connection."
+                msg = "I couldn't connect to the analysis service. Please check your internet connection."
+                return (False, msg) if return_status else msg
                 
             except Exception as e:
                 print(f"API Error (attempt {attempt + 1}/{self.retry_attempts + 1}): {e}")
                 if attempt < self.retry_attempts:
                     time.sleep(self.retry_delay)
                     continue
-                return "Sorry, I couldn't analyze the image right now. Please try again."
+                msg = "Sorry, I couldn't analyze the image right now. Please try again."
+                return (False, msg) if return_status else msg
         
-        return "Analysis failed after multiple attempts. Please try again later."
+        msg = "Analysis failed after multiple attempts. Please try again later."
+        return (False, msg) if return_status else msg
     
     def _format_response(self, text: str, mode: str, query: str = None) -> str:
         """

@@ -1,7 +1,7 @@
 """
 Face Enrollment Script for Local Face Recognition
 Creates folder-based face database for OpenCV LBPH recognition.
-NO dlib required - uses OpenCV Haar cascade for face detection.
+Uses DNN face detector with Haar fallback (Pi Zero 2W friendly).
 """
 
 import os
@@ -9,74 +9,18 @@ import sys
 import argparse
 import cv2
 from handlers.camera_handler import CameraHandler
+from handlers.face_detection import FaceDetector
 
-
-def ensure_haar_cascade():
-    """Ensure the Haar cascade XML file exists, downloading it if necessary."""
-    local_path = 'haarcascade_frontalface_default.xml'
-    
-    # 1. Try OpenCV's built-in data path
-    try:
-        path = cv2.data.haarcascades + local_path
-        if os.path.exists(path):
-            return path
-    except AttributeError:
-        pass
-
-    # 2. Try common system paths
-    common_paths = [
-        '/usr/share/opencv/haarcascades/' + local_path,
-        '/usr/share/opencv4/haarcascades/' + local_path,
-        '/usr/local/share/opencv/haarcascades/' + local_path,
-        '/opt/vc/share/opencv/haarcascades/' + local_path,
-        local_path # Current directory
-    ]
-    
-    for path in common_paths:
-        if os.path.exists(path):
-            return path
-
-    # 3. Download if not found
-    print(f"⚠️  Haar cascade not found on system. Downloading to {local_path}...")
-    url = f"https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/{local_path}"
-    try:
-        import urllib.request
-        urllib.request.urlretrieve(url, local_path)
-        print("✓ Downloaded Haar cascade successfully")
-        return local_path
-    except Exception as e:
-        print(f"✗ Failed to download Haar cascade: {e}")
-        print("Please run: sudo apt-get install opencv-data")
-        return None
-
-CASCADE_PATH = ensure_haar_cascade()
-
-if not CASCADE_PATH:
-    print("❌ Error: Haar cascade file missing and could not be downloaded.")
-    sys.exit(1)
-
-print(f"DEBUG: Using Haar cascade path: {CASCADE_PATH}")
-
-face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
-if face_cascade.empty():
-    print(f"❌ Error: Could not load Haar cascade from {CASCADE_PATH}")
-    sys.exit(1)
-print("✓ Haar cascade loaded successfully")
+detector = FaceDetector()
 
 
 def detect_faces(image_path):
-    """Detect faces in an image using OpenCV Haar cascade."""
+    """Detect faces in an image using DNN face detector with Haar fallback."""
     image = cv2.imread(image_path)
     if image is None:
         return []
-    
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    faces = face_cascade.detectMultiScale(
-        gray,
-        scaleFactor=1.1,
-        minNeighbors=5,
-        minSize=(30, 30)
-    )
+
+    faces = detector.detect(image)
     return faces
 
 
