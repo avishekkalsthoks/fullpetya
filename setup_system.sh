@@ -36,7 +36,6 @@ sudo apt-get install -y \
     python3-pil \
     python3-pyaudio \
     python3-requests \
-    python3-pytesseract \
     python3-rpi.gpio \
     opencv-data \
     tesseract-ocr \
@@ -51,7 +50,6 @@ sudo apt-get install -y \
     bluez \
     bluetooth \
     libbluetooth-dev \
-    libttspico-utils \
     espeak-ng \
     sox \
     espeak \
@@ -105,8 +103,23 @@ echo ""
 echo "[7/8] Installing pure-Python dependencies..."
 python3 -m pip install --upgrade pip setuptools wheel
 
-# requirements.txt should ONLY contain pure-Python libs
-pip install -r requirements.txt
+# Use piwheels to avoid heavy compilation on Pi Zero 2W
+PIP_FLAGS="--no-cache-dir --prefer-binary --index-url https://www.piwheels.org/simple"
+pip install $PIP_FLAGS -r requirements.txt || {
+    echo "⚠️  Pip install failed. Retrying without piwheels (may be slower)..."
+    pip install --no-cache-dir -r requirements.txt
+}
+
+# Optional: Vosk may fail on low-memory systems; continue if it does
+python3 - <<'EOF'
+import importlib
+try:
+    importlib.import_module("vosk")
+    print("✓ Vosk installed")
+except Exception as e:
+    print("⚠️  Vosk not available:", e)
+    print("   You can set STT_BACKEND=none to disable speech input.")
+EOF
 
 # Verify OpenCV face module
 python3 - <<EOF

@@ -49,10 +49,14 @@ By default, the system **tries online first** and falls back to offline if onlin
 
 ## Quick Start (Pi Zero 2W)
 
-### 1) Install system dependencies
+### 1) Install system dependencies (Buster 10 safe)
 ```bash
 sudo bash setup_system.sh
 ```
+
+This script:
+- Uses **apt** for heavy packages (OpenCV, Tesseract, audio)
+- Uses **piwheels** for pip to avoid compilation on 512MB RAM
 
 ### 2) Download local models (offline support)
 ```bash
@@ -112,6 +116,25 @@ These models are chosen to be lightweight and Pi-safe:
 
 Tesseract **is Pi-friendly** on 512MB RAM, but slower than online OCR.
 Keeping the image resolution at 512x384 makes OCR much faster and safer.
+
+---
+
+## Buster 10 + 512MB Install Tips (Important)
+
+On Pi Zero 2W, pip builds can fail due to low RAM. Use piwheels:
+```bash
+pip install --no-cache-dir --prefer-binary --index-url https://www.piwheels.org/simple -r requirements.txt
+```
+
+If Vosk fails to install, disable speech input:
+```bash
+STT_BACKEND=none
+```
+
+OCR still works offline if:
+```bash
+sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+```
 
 ---
 
