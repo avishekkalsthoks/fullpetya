@@ -336,6 +336,16 @@ class AudioHandler:
                 timeout=5,
                 check=True
             )
+            
+            # Apply latency offset to improve stability for Bluetooth
+            if 'bluez' in sink_name.lower():
+                # 50ms offset often helps with stuttering
+                subprocess.run(
+                    ['pactl', 'set-port-latency-offset', sink_name, 'headset-output', '50000'],
+                    capture_output=True,
+                    timeout=2
+                )
+                
             print(f"✓ Set default audio sink to: {sink_name}")
             return True
         except Exception as e:

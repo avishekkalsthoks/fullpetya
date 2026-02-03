@@ -146,6 +146,13 @@ if [ -f /etc/bluetooth/main.conf ]; then
     sudo sed -i 's/#MultiProfile = off/MultiProfile = multiple/g' /etc/bluetooth/main.conf
 fi
 
+# Apply Bluetooth Audio Stability Fixes
+if [ -f "$PROJECT_DIR/scripts/fix_bluetooth_audio.sh" ]; then
+    echo "Applying Bluetooth stability optimizations..."
+    chmod +x "$PROJECT_DIR/scripts/fix_bluetooth_audio.sh"
+    sudo "$PROJECT_DIR/scripts/fix_bluetooth_audio.sh"
+fi
+
 echo ""
 echo "=============================================="
 echo "✅ Setup complete (Pi Zero 2 W safe)"
