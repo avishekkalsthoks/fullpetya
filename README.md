@@ -211,6 +211,24 @@ faces/<name>/img2.jpg
 
 ---
 
+## Image Quality vs Speed (Important)
+
+By default, the app **preprocesses images** before sending to the online API:
+- Downscales to reduce payload
+- Recompresses to reduce upload time
+
+If you want **maximum image quality** (higher resolution, no preprocessing), set:
+```
+ENABLE_PREPROCESSING=false
+CAMERA_WIDTH=640
+CAMERA_HEIGHT=480
+CAMERA_JPEG_QUALITY=85
+```
+
+Note: higher resolution and quality **increase upload size and RAM usage**, which can slow responses on Pi Zero 2W. You can experiment to find your best balance.
+
+---
+
 ## Capture Storage (Optional)
 
 To save every captured image to disk:

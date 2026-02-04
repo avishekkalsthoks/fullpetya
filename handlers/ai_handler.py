@@ -11,7 +11,8 @@ from PIL import Image
 from config import (
     OPENROUTER_API_KEY, OPENROUTER_API_URL, OPENROUTER_MODEL,
     OPENROUTER_SITE_URL, OPENROUTER_SITE_NAME,
-    REQUEST_TIMEOUT, IMAGE_MAX_WIDTH, IMAGE_JPEG_QUALITY, SEARCH_OBJECTS
+    REQUEST_TIMEOUT, IMAGE_MAX_WIDTH, IMAGE_JPEG_QUALITY, SEARCH_OBJECTS,
+    ENABLE_PREPROCESSING
 )
 
 
@@ -51,11 +52,13 @@ class AIHandler:
         - Reduced max width from 640 to match camera output
         - Quality reduced to minimize upload size
         """
+        if not ENABLE_PREPROCESSING:
+            return image_bytes
         try:
             img = Image.open(io.BytesIO(image_bytes))
             
             # Resize if width exceeds max
-            if img.width > IMAGE_MAX_WIDTH:
+            if IMAGE_MAX_WIDTH > 0 and img.width > IMAGE_MAX_WIDTH:
                 ratio = IMAGE_MAX_WIDTH / float(img.width)
                 new_height = int(float(img.height) * ratio)
                 img = img.resize((IMAGE_MAX_WIDTH, new_height), Image.Resampling.LANCZOS)

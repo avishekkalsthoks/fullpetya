@@ -32,6 +32,7 @@ from config import (
     ANALYSIS_TIMEOUT, LOCAL_VISION_ONLY,
     FACE_DB_DIR, FACE_CONFIDENCE_THRESHOLD,
     SEARCH_DEFAULT_QUERY, STT_BACKEND,
+    CAMERA_JPEG_QUALITY,
     SAVE_CAPTURES, CAPTURE_DIR, CAPTURE_MAX_FILES,
     ENABLE_GARBAGE_COLLECTION
 )
@@ -284,7 +285,7 @@ class SmartVision:
             start_time = time.time()
             
             try:
-                img = self.camera.capture_image_bytes()
+                img = self.camera.capture_image_bytes(quality=CAMERA_JPEG_QUALITY)
                 capture_time = time.time() - start_time
                 print(f"✓ Image captured in {capture_time:.1f}s")
                 if SAVE_CAPTURES:

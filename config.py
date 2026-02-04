@@ -65,6 +65,7 @@ RETRY_DELAY = float(os.getenv('RETRY_DELAY', '2.0'))
 
 IMAGE_MAX_WIDTH = int(os.getenv('IMAGE_MAX_WIDTH', '512'))
 IMAGE_JPEG_QUALITY = int(os.getenv('IMAGE_JPEG_QUALITY', '60'))
+ENABLE_PREPROCESSING = os.getenv('ENABLE_PREPROCESSING', 'true').lower() == 'true'
 
 ANALYSIS_TIMEOUT = int(os.getenv('ANALYSIS_TIMEOUT', '60'))
 
@@ -83,6 +84,7 @@ CAMERA_WIDTH = int(os.getenv('CAMERA_WIDTH', '512'))
 CAMERA_HEIGHT = int(os.getenv('CAMERA_HEIGHT', '384'))
 CAMERA_WARMUP_FRAMES = int(os.getenv('CAMERA_WARMUP_FRAMES', '10'))
 CAMERA_RETRY_ATTEMPTS = int(os.getenv('CAMERA_RETRY_ATTEMPTS', '3'))
+CAMERA_JPEG_QUALITY = int(os.getenv('CAMERA_JPEG_QUALITY', '70'))
 
 # ===============================================
 # Capture Storage (Optional)
