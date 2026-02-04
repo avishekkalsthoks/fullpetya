@@ -92,6 +92,23 @@ python3 main.py
 
 ---
 
+## Search Mode Behavior
+
+If speech input is not available, Search mode will **scan for common items** and tell you where one is found.
+The default behavior is controlled by:
+```
+SEARCH_DEFAULT_QUERY=auto
+```
+
+You can set a specific default item instead:
+```
+SEARCH_DEFAULT_QUERY=bottle
+```
+
+Common items list (online): phone, wallet, keys, glasses, bottle, bag, backpack, book, remote, laptop, chair, table, sofa, tv.
+
+---
+
 ## Search Mode Voice Input (Microphone)
 
 Search mode uses **offline speech-to-text (Vosk)** by default.

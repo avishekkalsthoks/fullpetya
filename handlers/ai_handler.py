@@ -107,10 +107,11 @@ class AIHandler:
                 "If no text, say 'No text detected.'"
             ),
             'search': (
-                f"You are helping a blind person find objects. "
-                f"List the main objects you see and include their approximate position "
-                f"(left/center/right) and distance (near/far). "
-                f"Common items include: {', '.join(SEARCH_OBJECTS[:12])}."
+                f"You are helping a blind person find frequently needed items. "
+                f"Look for items such as: {', '.join(SEARCH_OBJECTS[:12])}. "
+                f"If you see any, say which item it is and give its position "
+                f"(left/center/right) and approximate distance (steps or arm-lengths). "
+                f"If none are present, say you don't see common items."
             )
         }
         

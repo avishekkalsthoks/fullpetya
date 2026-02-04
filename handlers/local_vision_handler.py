@@ -55,6 +55,13 @@ class LocalVisionHandler:
         "people": "person"
     }
 
+    # Offline-safe frequent items (only items MobileNet-SSD can actually detect)
+    OFFLINE_FREQUENT_LABELS = {
+        "bottle", "chair", "diningtable", "sofa", "tvmonitor",
+        "car", "bus", "bicycle", "motorbike",
+        "dog", "cat", "pottedplant", "train", "boat"
+    }
+
     def __init__(self, model_dir: Optional[str] = None):
         self.model_dir = model_dir or LOCAL_MODEL_DIR
         self.net = None
@@ -222,8 +229,8 @@ class LocalVisionHandler:
 
     def search_object(self, image_bytes: bytes, query: str) -> str:
         """Offline object search using local detector."""
-        if not query:
-            return "I didn't hear a search target."
+        if not query or query.strip().lower() in ("auto", "scan"):
+            return self.search_frequent_items(image_bytes)
 
         query_norm = query.strip().lower()
         target = self.SYNONYMS.get(query_norm, query_norm)
@@ -240,11 +247,32 @@ class LocalVisionHandler:
         # If target not recognized by local model
         if target not in self.LABELS and target not in self.SYNONYMS.values():
             return (
-                "Offline search supports common items like person, chair, bottle, car, dog, cat, and bicycle. "
+                "Offline search supports common items like chair, bottle, car, dog, cat, bicycle, and tv. "
                 "Try a simpler word or go online for more detailed search."
             )
 
         return f"No, I don't see {query_norm} right now."
+
+    def search_frequent_items(self, image_bytes: bytes) -> str:
+        """Scan for common needed items and report one if found."""
+        detections = self.detect_objects(image_bytes, top_k=10)
+        if not detections:
+            return "I couldn't identify objects offline. Try better lighting or go online."
+
+        # Filter to frequent labels only
+        matches = [d for d in detections if d["label"] in self.OFFLINE_FREQUENT_LABELS and d["label"] != "person"]
+        if not matches:
+            return "I don't see any common items right now."
+
+        d = matches[0]
+        label = d["label"]
+        pretty = {
+            "tvmonitor": "tv",
+            "diningtable": "table",
+            "motorbike": "motorbike",
+            "pottedplant": "plant"
+        }.get(label, label)
+        return f"I see a {pretty} in the {d['position']}, {d['distance']}."
 
     def ocr_text(self, image_bytes: bytes) -> str:
         """Offline OCR using Tesseract."""

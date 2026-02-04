@@ -366,6 +366,9 @@ class SmartVision:
         if analysis_id is not None and self._analysis_cancel.get(analysis_id) and self._analysis_cancel[analysis_id].is_set():
             return
 
+        query_norm = (query or "").strip().lower()
+        query_for_ai = None if query_norm in ("", "auto", "scan") else query
+
         use_online = self.ai is not None and not LOCAL_VISION_ONLY
         if use_online:
             self.audio.say("Analyzing online. Please wait.")
@@ -377,7 +380,7 @@ class SmartVision:
                 success, result = self.ai.analyze_image(
                     image_bytes,
                     mode=mode,
-                    query=query,
+                    query=query_for_ai,
                     progress_callback=progress_callback,
                     return_status=True
                 )
@@ -439,7 +442,10 @@ class SmartVision:
 
         if not query:
             query = SEARCH_DEFAULT_QUERY
-            self.audio.say(f"I didn't catch that. Searching for {query}.")
+            if query.strip().lower() in ("auto", ""):
+                self.audio.say("Scanning for common items.")
+            else:
+                self.audio.say(f"I didn't catch that. Searching for {query}.")
         else:
             self.audio.say(f"Searching for {query}.")
 

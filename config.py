@@ -111,22 +111,20 @@ STT_BACKEND = os.getenv('STT_BACKEND', 'auto')  # 'vosk', 'auto', or 'none'
 VOSK_MODEL_PATH = os.getenv('VOSK_MODEL_PATH', os.path.join(LOCAL_MODEL_DIR, 'vosk-model-small-en-us-0.15'))
 VOICE_INPUT_SECONDS = float(os.getenv('VOICE_INPUT_SECONDS', '4'))
 VOICE_INPUT_SAMPLE_RATE = int(os.getenv('VOICE_INPUT_SAMPLE_RATE', '16000'))
-SEARCH_DEFAULT_QUERY = os.getenv('SEARCH_DEFAULT_QUERY', 'person')
+SEARCH_DEFAULT_QUERY = os.getenv('SEARCH_DEFAULT_QUERY', 'auto')
 
 # ===============================================
 # Search Mode Configuration (Common objects)
 # ===============================================
 
 SEARCH_OBJECTS = [
-    "person", "people", "man", "woman", "child", "baby",
-    "chair", "table", "bed", "couch", "sofa",
-    "door", "window", "stairs", "elevator",
-    "car", "bus", "bicycle", "motorcycle",
-    "dog", "cat", "bird", "animal",
-    "phone", "laptop", "tv", "remote",
-    "book", "bottle", "cup", "plate",
+    # Frequently needed items (broad, online-capable list)
+    "phone", "wallet", "keys", "glasses", "watch",
+    "bottle", "cup", "plate",
     "bag", "backpack", "umbrella",
-    "glasses", "keys", "wallet"
+    "book", "remote", "laptop", "charger",
+    "chair", "table", "sofa", "tv",
+    "door", "window"
 ]
 
 # ===============================================
