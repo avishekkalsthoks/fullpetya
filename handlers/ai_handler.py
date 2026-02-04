@@ -43,6 +43,7 @@ class AIHandler:
         self.retry_attempts = retry_attempts
         self.retry_delay = retry_delay
         self.last_successful_response = None  # Cache for fallback
+        self.quota_exhausted = False
 
     def _preprocess_image(self, image_bytes: bytes) -> bytes:
         """
@@ -164,6 +165,10 @@ class AIHandler:
         Returns:
             Human-readable analysis result
         """
+        if self.quota_exhausted:
+            msg = "Online quota is exhausted. Please update your API key or billing."
+            return (False, msg) if return_status else msg
+
         payload = self._build_payload(image_bytes, mode, query)
         
         # Try with retry logic
@@ -184,6 +189,23 @@ class AIHandler:
                     print(f"Rate limited. Waiting {self.retry_delay * 2}s...")
                     time.sleep(self.retry_delay * 2)
                     continue
+
+                # Handle quota/billing errors
+                if response.status_code in (401, 402, 403):
+                    try:
+                        err_json = response.json()
+                        err_msg = err_json.get("error", {}).get("message", "")
+                    except Exception:
+                        err_msg = response.text or ""
+
+                    lower_msg = err_msg.lower()
+                    if any(k in lower_msg for k in ["quota", "credit", "billing", "insufficient", "payment required"]):
+                        self.quota_exhausted = True
+                        msg = "Online quota is exhausted. Please update your API key or billing."
+                        return (False, msg) if return_status else msg
+                    # If auth error but not quota, still surface a clear message
+                    msg = "Online API authorization failed. Please check your API key."
+                    return (False, msg) if return_status else msg
                 
                 response.raise_for_status()
                 result = response.json()
@@ -199,6 +221,11 @@ class AIHandler:
                 elif isinstance(result, dict) and "error" in result:
                     error_msg = result.get("error", {}).get("message", "Unknown error")
                     print(f"API error response: {error_msg}")
+                    lower_msg = error_msg.lower()
+                    if any(k in lower_msg for k in ["quota", "credit", "billing", "insufficient", "payment required"]):
+                        self.quota_exhausted = True
+                        msg = "Online quota is exhausted. Please update your API key or billing."
+                        return (False, msg) if return_status else msg
                     if "loading" in error_msg.lower() or "warming up" in error_msg.lower():
                         print("Model is loading, will retry...")
                         time.sleep(self.retry_delay * 3)

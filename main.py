@@ -369,7 +369,7 @@ class SmartVision:
         query_norm = (query or "").strip().lower()
         query_for_ai = None if query_norm in ("", "auto", "scan") else query
 
-        use_online = self.ai is not None and not LOCAL_VISION_ONLY
+        use_online = self.ai is not None and not LOCAL_VISION_ONLY and not getattr(self.ai, "quota_exhausted", False)
         if use_online:
             self.audio.say("Analyzing online. Please wait.")
 
@@ -392,6 +392,8 @@ class SmartVision:
                 print("⚠️  Online analysis failed, falling back to offline.")
             except Exception as e:
                 print(f"⚠️  Online analysis error: {e}")
+        elif self.ai is not None and getattr(self.ai, "quota_exhausted", False):
+            self.audio.say("Online quota is exhausted. Switching to offline analysis.")
 
         # Offline fallback
         if not self.local_vision:
