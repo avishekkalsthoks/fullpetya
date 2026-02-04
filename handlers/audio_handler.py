@@ -6,6 +6,7 @@ Optimized for Raspberry Pi Zero 2W with Bluetooth audio support and minimal over
 import subprocess
 import shutil
 import os
+import time
 
 
 class AudioHandler:
@@ -35,6 +36,8 @@ class AudioHandler:
         self.voice = voice
         self.backend = self._resolve_backend(self.backend)
         self._test_audio_system()
+        if self.use_bluetooth:
+            self.wait_for_bluetooth_sink()
 
     def _resolve_backend(self, backend: str) -> str:
         """Resolve 'auto' backend to best available local option."""
@@ -357,6 +360,21 @@ class AudioHandler:
             print(f"Error getting audio status: {e}")
             
         return status
+
+    def wait_for_bluetooth_sink(self, timeout_seconds=15):
+        """
+        Wait for a Bluetooth audio sink to appear and set it as default.
+        This prevents startup audio from going to auto_null.
+        """
+        start = time.time()
+        while time.time() - start < timeout_seconds:
+            status = self.get_audio_status()
+            bt_sinks = [s['name'] for s in status['sinks'] if s['bluetooth']]
+            if bt_sinks:
+                self.set_default_sink(bt_sinks[0])
+                return True
+            time.sleep(1)
+        return False
 
     def set_default_sink(self, sink_name):
         """Set default PulseAudio sink for Bluetooth routing."""
