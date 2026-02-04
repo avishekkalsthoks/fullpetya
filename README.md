@@ -211,6 +211,19 @@ faces/<name>/img2.jpg
 
 ---
 
+## Capture Storage (Optional)
+
+To save every captured image to disk:
+```
+SAVE_CAPTURES=true
+CAPTURE_DIR=captures
+CAPTURE_MAX_FILES=200
+```
+
+Files are saved as `YYYYMMDD_HHMMSS_mode.jpg`.
+
+---
+
 ## Troubleshooting
 
 **No offline objects detected**
@@ -218,6 +231,7 @@ faces/<name>/img2.jpg
 
 **OCR not working**
 - Confirm Tesseract installed: `tesseract --version`
+ - If OCR times out on blurry images, move closer or improve lighting and retry
 
 **Search mode hears nothing**
 - Ensure microphone is available: `arecord -l`

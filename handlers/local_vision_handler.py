@@ -17,7 +17,8 @@ from config import (
     OBJECT_DNN_PROTO,
     OBJECT_DNN_MODEL,
     OBJECT_DNN_CONFIDENCE,
-    TESSERACT_CMD
+    TESSERACT_CMD,
+    OCR_TIMEOUT
 )
 
 
@@ -260,7 +261,11 @@ class LocalVisionHandler:
         _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
         try:
-            text = self.pytesseract.image_to_string(thresh, lang="eng")
+            try:
+                text = self.pytesseract.image_to_string(thresh, lang="eng", timeout=OCR_TIMEOUT)
+            except TypeError:
+                # Older pytesseract versions may not support timeout
+                text = self.pytesseract.image_to_string(thresh, lang="eng")
         except Exception as e:
             return f"Offline OCR failed: {e}"
 

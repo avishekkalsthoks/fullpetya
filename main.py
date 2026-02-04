@@ -32,6 +32,7 @@ from config import (
     ANALYSIS_TIMEOUT, LOCAL_VISION_ONLY,
     FACE_DB_DIR, FACE_CONFIDENCE_THRESHOLD,
     SEARCH_DEFAULT_QUERY, STT_BACKEND,
+    SAVE_CAPTURES, CAPTURE_DIR, CAPTURE_MAX_FILES,
     ENABLE_GARBAGE_COLLECTION
 )
 from handlers.camera_handler import CameraHandler
@@ -87,6 +88,8 @@ class SmartVision:
         self.running = True
         self.selected_mode = 'describe'  # Default starting mode
         self.analysis_in_progress = False
+        self._analysis_id = 0
+        self._analysis_cancel = {}
         
         # Button debounce tracking
         self.last_button_press = {}
@@ -260,6 +263,9 @@ class SmartVision:
             query: Optional query for search mode
         """
         self.analysis_in_progress = True
+        self._analysis_id += 1
+        analysis_id = self._analysis_id
+        self._analysis_cancel[analysis_id] = threading.Event()
         
         try:
             # For search mode, we need to get the query first
@@ -281,6 +287,8 @@ class SmartVision:
                 img = self.camera.capture_image_bytes()
                 capture_time = time.time() - start_time
                 print(f"✓ Image captured in {capture_time:.1f}s")
+                if SAVE_CAPTURES:
+                    self._save_capture(img, mode)
             except Exception as e:
                 print(f"✗ Camera error: {e}")
                 self.audio.say("Sorry, I couldn't capture an image. Please check the camera and try again.")
@@ -295,16 +303,20 @@ class SmartVision:
             def watchdog():
                 if not watchdog_triggered.wait(timeout=ANALYSIS_TIMEOUT):
                     print(f"⚠️  Analysis timeout after {ANALYSIS_TIMEOUT}s")
-                    self.audio.say("The analysis is taking too long. Please try again.")
+                    # Mark cancelled to ignore late results
+                    self._analysis_cancel[analysis_id].set()
+                    if analysis_id == self._analysis_id:
+                        self.analysis_in_progress = False
+                        self.audio.say("The analysis is taking too long. Please try again.")
             
             watchdog_thread = threading.Thread(target=watchdog, daemon=True)
             watchdog_thread.start()
             
             # Run the actual analysis
             if mode == 'face':
-                self._process_face_mode(img)
+                self._process_face_mode(img, analysis_id)
             else:
-                self._process_vision_mode(img, mode, query)
+                self._process_vision_mode(img, mode, query, analysis_id)
             
             # Cancel watchdog
             watchdog_triggered.set()
@@ -321,10 +333,14 @@ class SmartVision:
             traceback.print_exc()
             self.audio.say("Sorry, an error occurred. Please try again.")
         finally:
-            self.analysis_in_progress = False
+            # Avoid letting old threads reset state
+            if analysis_id == self._analysis_id:
+                self.analysis_in_progress = False
 
-    def _process_face_mode(self, image_bytes):
+    def _process_face_mode(self, image_bytes, analysis_id):
         """Process local face recognition mode."""
+        if self._analysis_cancel.get(analysis_id) and self._analysis_cancel[analysis_id].is_set():
+            return
         if not self.face:
             self.audio.say("Face recognition is not available.")
             return
@@ -334,6 +350,8 @@ class SmartVision:
         try:
             # Use local face recognition (no API calls)
             result = self.face.recognize_from_bytes(image_bytes)
+            if self._analysis_cancel[analysis_id].is_set():
+                return
             self.audio.say(result)
             
         except Exception as e:
@@ -341,9 +359,11 @@ class SmartVision:
             traceback.print_exc()
             self.audio.say("Sorry, face recognition failed. Please try again.")
 
-    def _process_vision_mode(self, image_bytes, mode, query=None):
+    def _process_vision_mode(self, image_bytes, mode, query=None, analysis_id=None):
         """Process AI-based modes with offline fallback."""
         result = None
+        if analysis_id is not None and self._analysis_cancel.get(analysis_id) and self._analysis_cancel[analysis_id].is_set():
+            return
 
         use_online = self.ai is not None and not LOCAL_VISION_ONLY
         if use_online:
@@ -361,6 +381,8 @@ class SmartVision:
                     return_status=True
                 )
                 if success:
+                    if analysis_id is not None and self._analysis_cancel[analysis_id].is_set():
+                        return
                     self.audio.say(result)
                     return
                 print("⚠️  Online analysis failed, falling back to offline.")
@@ -372,6 +394,8 @@ class SmartVision:
             self.audio.say("Offline analysis is not available. Please check configuration.")
             return
 
+        if analysis_id is not None and self._analysis_cancel[analysis_id].is_set():
+            return
         self.audio.say("Using offline analysis.")
         if mode == 'describe':
             result = self.local_vision.describe_scene(image_bytes)
@@ -384,6 +408,8 @@ class SmartVision:
         else:
             result = "Unsupported mode."
 
+        if analysis_id is not None and self._analysis_cancel[analysis_id].is_set():
+            return
         self.audio.say(result)
 
     def _get_search_query(self):
@@ -418,6 +444,42 @@ class SmartVision:
 
         print(f"🎤 Heard: {query}")
         return query
+
+    def _save_capture(self, image_bytes, mode):
+        """Save captured image to disk for later review."""
+        try:
+            os.makedirs(CAPTURE_DIR, exist_ok=True)
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filename = f"{timestamp}_{mode}.jpg"
+            path = os.path.join(CAPTURE_DIR, filename)
+            with open(path, "wb") as f:
+                f.write(image_bytes)
+            print(f"OK: Saved capture to {path}")
+            self._prune_captures()
+        except Exception as e:
+            print(f"WARN: Failed to save capture: {e}")
+
+    def _prune_captures(self):
+        """Keep the capture directory from growing without limit."""
+        if CAPTURE_MAX_FILES <= 0:
+            return
+        try:
+            files = [
+                os.path.join(CAPTURE_DIR, f)
+                for f in os.listdir(CAPTURE_DIR)
+                if f.lower().endswith(".jpg")
+            ]
+            if len(files) <= CAPTURE_MAX_FILES:
+                return
+            files.sort(key=lambda p: os.path.getmtime(p))
+            to_remove = files[:-CAPTURE_MAX_FILES]
+            for p in to_remove:
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _shutdown(self):
         """Shutdown the system gracefully."""

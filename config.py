@@ -35,6 +35,7 @@ OBJECT_DNN_CONFIDENCE = float(os.getenv('OBJECT_DNN_CONFIDENCE', '0.45'))
 
 # Offline OCR (Tesseract)
 TESSERACT_CMD = os.getenv('TESSERACT_CMD', '').strip()
+OCR_TIMEOUT = int(os.getenv('OCR_TIMEOUT', '8'))
 
 # ===============================================
 # Face Recognition Configuration
@@ -82,6 +83,14 @@ CAMERA_WIDTH = int(os.getenv('CAMERA_WIDTH', '512'))
 CAMERA_HEIGHT = int(os.getenv('CAMERA_HEIGHT', '384'))
 CAMERA_WARMUP_FRAMES = int(os.getenv('CAMERA_WARMUP_FRAMES', '10'))
 CAMERA_RETRY_ATTEMPTS = int(os.getenv('CAMERA_RETRY_ATTEMPTS', '3'))
+
+# ===============================================
+# Capture Storage (Optional)
+# ===============================================
+
+SAVE_CAPTURES = os.getenv('SAVE_CAPTURES', 'false').lower() == 'true'
+CAPTURE_DIR = os.getenv('CAPTURE_DIR', 'captures')
+CAPTURE_MAX_FILES = int(os.getenv('CAPTURE_MAX_FILES', '200'))
 
 # ===============================================
 # Audio/TTS Settings
