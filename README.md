@@ -9,6 +9,7 @@ An assistive vision device optimized for Raspberry Pi Zero 2W (512MB RAM) with *
 - Stronger face detection via OpenCV DNN + local LBPH recognition
 - Offline OCR using Tesseract
 - Search mode voice input with offline STT (Vosk)
+- **Ultrasonic obstacle detection** with buzzer alerts
 - Pi Zero 2W tuned: reduced image size, low memory defaults
 
 ## Modes (Online + Offline)
@@ -44,6 +45,8 @@ By default, the system **tries online first** and falls back to offline if onlin
 - 2 tactile push buttons (GPIO 17 + 27)
 - Bluetooth headset/speaker (mic recommended for Search)
 - MicroSD card (16GB+)
+- **HC-SR04 Ultrasonic Sensor** (optional, for obstacle detection)
+- **Buzzer** (optional, for obstacle alerts)
 
 ---
 
@@ -275,6 +278,71 @@ Files are saved as `YYYYMMDD_HHMMSS_mode.jpg`.
 **Face recognition poor**
 - Enroll 3-5 photos in good lighting
 - Ensure faces are centered and clear
+
+**Ultrasonic sensor not working**
+- Check wiring: TRIG -> GPIO 23, ECHO -> GPIO 24 (with voltage divider!)
+- Ensure buzzer is connected to GPIO 25
+- Test with `python3 -c "from handlers.ultrasonic_handler import UltrasonicHandler; u = UltrasonicHandler(23,24,25); print(u.measure_distance())"`
+
+---
+
+## Ultrasonic Obstacle Detection
+
+The device can detect nearby obstacles using an **HC-SR04 ultrasonic sensor** and alert the user with a **buzzer**.
+
+### Wiring Diagram
+
+```
+HC-SR04 Ultrasonic Sensor:
+  VCC  -> Pi 5V
+  GND  -> Pi GND
+  TRIG -> GPIO 23
+  ECHO -> GPIO 24 (⚠️ Use voltage divider! See below)
+
+Buzzer:
+  Positive (+) -> GPIO 25
+  Negative (-) -> Pi GND
+```
+
+**Important:** The HC-SR04 ECHO pin outputs 5V, but Pi GPIO is 3.3V tolerant only!
+Use a simple voltage divider:
+```
+ECHO pin ----[1kΩ]----+----[2kΩ]---- GND
+                      |
+                GPIO 24
+```
+
+### Configuration
+
+In your `.env` file:
+```bash
+# Enable ultrasonic obstacle detection
+ENABLE_ULTRASONIC=true
+
+# Pins (BCM numbering)
+ULTRASONIC_TRIGGER_PIN=23
+ULTRASONIC_ECHO_PIN=24
+BUZZER_PIN=25
+
+# Distance thresholds (cm)
+ULTRASONIC_ALERT_DISTANCE=50   # Start beeping at 50cm
+ULTRASONIC_DANGER_DISTANCE=20  # Rapid beeping at 20cm
+
+# Check interval
+ULTRASONIC_CHECK_INTERVAL=0.2  # Check every 200ms
+```
+
+### How It Works
+
+- **No beep**: Object is more than 50cm away (safe zone)
+- **Slow beep**: Object is 25-50cm away (alert zone)
+- **Fast beep**: Object is 20-25cm away (close)
+- **Rapid beep**: Object is less than 20cm away (danger zone)
+
+To disable ultrasonic detection:
+```
+ENABLE_ULTRASONIC=false
+```
 
 ---
 

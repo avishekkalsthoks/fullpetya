@@ -77,6 +77,28 @@ BUTTON_MODE_PIN = int(os.getenv('BUTTON_MODE_PIN', '17'))
 BUTTON_SELECT_PIN = int(os.getenv('BUTTON_SELECT_PIN', '27'))
 
 # ===============================================
+# Ultrasonic Sensor + Buzzer Configuration
+# ===============================================
+
+# HC-SR04 Ultrasonic Sensor pins
+ULTRASONIC_TRIGGER_PIN = int(os.getenv('ULTRASONIC_TRIGGER_PIN', '23'))
+ULTRASONIC_ECHO_PIN = int(os.getenv('ULTRASONIC_ECHO_PIN', '24'))
+
+# Buzzer pin
+BUZZER_PIN = int(os.getenv('BUZZER_PIN', '25'))
+
+# Enable/disable ultrasonic obstacle detection
+ENABLE_ULTRASONIC = os.getenv('ENABLE_ULTRASONIC', 'true').lower() == 'true'
+
+# Distance thresholds in centimeters
+ULTRASONIC_ALERT_DISTANCE = float(os.getenv('ULTRASONIC_ALERT_DISTANCE', '50'))  # Start warning at 50cm
+ULTRASONIC_DANGER_DISTANCE = float(os.getenv('ULTRASONIC_DANGER_DISTANCE', '20'))  # Danger zone at 20cm
+
+# Buzzer settings
+BUZZER_FREQUENCY = int(os.getenv('BUZZER_FREQUENCY', '2000'))  # Hz (for PWM buzzer)
+ULTRASONIC_CHECK_INTERVAL = float(os.getenv('ULTRASONIC_CHECK_INTERVAL', '0.2'))  # Check every 200ms
+
+# ===============================================
 # Camera Settings (optimized for Pi Camera)
 # ===============================================
 
