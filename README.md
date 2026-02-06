@@ -5,7 +5,7 @@ An assistive vision device optimized for Raspberry Pi Zero 2W (512MB RAM) with *
 ## Highlights
 
 - Works **offline** for all modes using lightweight local models
-- Uses **OpenRouter** online AI for higher quality when internet is available
+- Uses **Azure Computer Vision** online analysis for higher quality when internet is available
 - Stronger face detection via OpenCV DNN + local LBPH recognition
 - Offline OCR using Tesseract
 - Search mode voice input with offline STT (Vosk)
@@ -14,7 +14,7 @@ An assistive vision device optimized for Raspberry Pi Zero 2W (512MB RAM) with *
 
 ## Modes (Online + Offline)
 
-| Mode | Online (OpenRouter) | Offline Fallback |
+| Mode | Online (Azure Vision) | Offline Fallback |
 |------|----------------------|------------------|
 | Describe | Full scene description | Object summary + positions + distance hints |
 | OCR | Vision OCR | Tesseract OCR |
@@ -74,7 +74,8 @@ nano .env
 
 Set at least:
 ```
-OPENROUTER_API_KEY=your_key_here
+AZURE_VISION_ENDPOINT=https://your-resource.cognitiveservices.azure.com
+AZURE_VISION_KEY=your_key_here
 ```
 Optional for offline-only:
 ```

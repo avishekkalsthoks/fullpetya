@@ -7,13 +7,8 @@ load_dotenv()
 # API Configuration (Online AI)
 # ===============================================
 
-OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY', '').strip()
-OPENROUTER_MODEL = os.getenv('OPENROUTER_MODEL', 'allenai/molmo-2-8b:free')
-OPENROUTER_API_URL = os.getenv('OPENROUTER_API_URL', 'https://openrouter.ai/api/v1/chat/completions')
-
-# Optional: Site URL and name for rankings on openrouter.ai
-OPENROUTER_SITE_URL = os.getenv('OPENROUTER_SITE_URL', '').strip()
-OPENROUTER_SITE_NAME = os.getenv('OPENROUTER_SITE_NAME', 'Smart Vision Guide').strip()
+AZURE_VISION_ENDPOINT = os.getenv('AZURE_VISION_ENDPOINT', '').strip()
+AZURE_VISION_KEY = os.getenv('AZURE_VISION_KEY', '').strip()
 
 # ===============================================
 # Local / Offline Vision Configuration
@@ -170,8 +165,7 @@ ENABLE_SEARCH_MODE = os.getenv('ENABLE_SEARCH_MODE', 'true').lower() == 'true'
 def get_system_info():
     """Get system information for debugging."""
     return {
-        'openrouter_configured': bool(OPENROUTER_API_KEY),
-        'openrouter_model': OPENROUTER_MODEL,
+        'azure_configured': bool(AZURE_VISION_ENDPOINT and AZURE_VISION_KEY),
         'local_vision_only': LOCAL_VISION_ONLY,
         'local_model_dir': LOCAL_MODEL_DIR,
         'tts_backend': TTS_BACKEND,
@@ -185,8 +179,7 @@ if __name__ == '__main__':
     print("=" * 50)
     info = get_system_info()
     print(f"\n🔧 API Configuration:")
-    print(f"  OpenRouter: {'✓ Configured' if info['openrouter_configured'] else '✗ Not configured'}")
-    print(f"  Model:      {info['openrouter_model']}")
+    print(f"  Azure Vision: {'✓ Configured' if info['azure_configured'] else '✗ Not configured'}")
     print(f"\n🧠 Local Vision:")
     print(f"  Offline Only: {info['local_vision_only']}")
     print(f"  Model Dir:    {info['local_model_dir']}")
