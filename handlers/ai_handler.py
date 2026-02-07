@@ -14,6 +14,133 @@ from config import (
     ENABLE_PREPROCESSING, RETRY_ATTEMPTS, RETRY_DELAY
 )
 
+def interpret_azure_objects(objects_json, image_width, image_height, max_sentences=3):
+    """
+    Convert Azure object detections into short, spatially-aware sentences.
+    Returns an empty string if nothing meaningful can be produced.
+    """
+    if not objects_json or not image_width or not image_height:
+        return ""
+
+    try:
+        image_area = float(image_width * image_height)
+    except Exception:
+        return ""
+
+    if image_area <= 0:
+        return ""
+
+    critical = {
+        "person", "people", "door", "stairs", "staircase", "step", "steps", "curb",
+        "edge", "wall", "window", "glass", "pole", "post", "sign", "stop sign",
+        "traffic light", "vehicle", "car", "bus", "truck", "bicycle", "bike",
+        "motorcycle", "train", "dog", "cat"
+    }
+    large_furniture = {
+        "table", "chair", "bed", "sofa", "couch", "desk", "bench",
+        "cabinet", "closet", "wardrobe", "refrigerator", "fridge",
+        "sink", "toilet", "tv"
+    }
+
+    def priority_rank(name_lower):
+        if name_lower in critical:
+            return 0
+        if name_lower in large_furniture:
+            return 1
+        return 2
+
+    def position_label(rect):
+        if not rect:
+            return None
+        try:
+            x = float(rect.get("x", 0))
+            w = float(rect.get("w", 0))
+            center = x + (w / 2.0)
+        except Exception:
+            return None
+
+        if center < image_width * 0.33:
+            return "left"
+        if center > image_width * 0.66:
+            return "right"
+        return "center"
+
+    def distance_label(rect):
+        if not rect:
+            return None
+        try:
+            w = float(rect.get("w", 0))
+            h = float(rect.get("h", 0))
+        except Exception:
+            return None
+        if w <= 0 or h <= 0:
+            return None
+        ratio = (w * h) / image_area
+        if ratio >= 0.20:
+            return "very close"
+        if ratio >= 0.07:
+            return "a few steps away"
+        return "far away"
+
+    def is_plural(name_lower):
+        if name_lower in {"people", "stairs", "steps"}:
+            return True
+        return name_lower.endswith("s") and not name_lower.endswith("ss")
+
+    def article_for(name_lower):
+        return "an" if name_lower[:1] in {"a", "e", "i", "o", "u"} else "a"
+
+    parsed = []
+    for obj in objects_json:
+        name = (obj.get("object") or "").strip()
+        if not name:
+            continue
+        name_lower = name.lower()
+        parsed.append({
+            "name": name_lower,
+            "display": name_lower,
+            "confidence": float(obj.get("confidence", 0) or 0),
+            "rect": obj.get("rectangle") or {}
+        })
+
+    if not parsed:
+        return ""
+
+    parsed.sort(key=lambda o: (priority_rank(o["name"]), -o["confidence"]))
+
+    sentences = []
+    seen = set()
+    for obj in parsed:
+        if obj["name"] in seen:
+            continue
+        seen.add(obj["name"])
+
+        pos = position_label(obj["rect"])
+        dist = distance_label(obj["rect"])
+
+        if pos == "center":
+            location = "in front of you"
+        elif pos in {"left", "right"}:
+            location = f"to your {pos}"
+        else:
+            location = "nearby"
+
+        if is_plural(obj["name"]):
+            sentence = f"There are {obj['display']} {location}"
+        else:
+            sentence = f"There is {article_for(obj['name'])} {obj['display']} {location}"
+
+        if dist:
+            sentence = f"{sentence}, {dist}."
+        else:
+            sentence = f"{sentence}."
+
+        sentences.append(sentence)
+        if len(sentences) >= max_sentences:
+            break
+
+    return " ".join(sentences)
+
 
 class AzureAPIError(RuntimeError):
     def __init__(self, message, retryable=False, quota=False, auth=False):
@@ -360,6 +487,29 @@ class AzureAIHandler:
         parsed.sort(key=lambda o: o["confidence"], reverse=True)
         return parsed
 
+    def _is_description_short(self, text):
+        if not text:
+            return True
+        cleaned = " ".join(text.split())
+        return len(cleaned) < 25 or len(cleaned.split()) < 4
+
+    def _is_fallback_description(self, text):
+        return text.startswith("I'm looking at the image, but I can't make out clear details.")
+
+    def _merge_descriptions(self, primary, secondary, max_sentences=3):
+        def split_sentences(value):
+            value = value.strip()
+            if not value:
+                return []
+            parts = re.split(r"(?<=[.!?])\s+", value)
+            return [p for p in parts if p]
+
+        combined = split_sentences(primary) + split_sentences(secondary)
+        if not combined:
+            return ""
+        combined = combined[:max_sentences]
+        return " ".join(combined)
+
     def _format_describe(self, text):
         text = (text or "").strip()
         if not text:
@@ -384,7 +534,7 @@ class AzureAIHandler:
         joined = self._shorten(joined, 200)
         return f"I can read: {joined}"
 
-    def _format_search(self, objects, width, query=None):
+    def _format_search(self, objects, width, height=None, query=None):
         parsed = self._parse_objects(objects)
         if query:
             q = query.strip().lower()
@@ -402,6 +552,10 @@ class AzureAIHandler:
                     return f"Yes, I see {match['name']} on the {pos}."
                 return f"Yes, I see {match['name']}."
             return f"No, I don't see {query}."
+
+        interpreted = interpret_azure_objects(objects, width, height)
+        if interpreted:
+            return interpreted
 
         common = {item.lower() for item in SEARCH_OBJECTS}
         filtered = [obj for obj in parsed if obj["name_lower"] in common]
@@ -446,6 +600,23 @@ class AzureAIHandler:
                     raw = self._describe(processed_bytes)
                     formatted = self._format_describe(raw)
 
+                    desc_short = self._is_description_short(raw) or self._is_fallback_description(formatted)
+                    objects = None
+                    interpreted = ""
+
+                    elapsed = time.time() - start_time
+                    remaining = self.total_budget - elapsed
+
+                    # If description is short, try local interpretation from objects.
+                    if desc_short and remaining > 0.6:
+                        objects = self._analyze_objects(
+                            processed_bytes,
+                            timeout_seconds=min(self.request_timeout, remaining)
+                        )
+                        interpreted = interpret_azure_objects(objects, width, _height)
+                        if interpreted:
+                            formatted = interpreted
+
                     # Optional currency check for describe mode (OCR preferred, objects as a hint).
                     currency_note = None
                     elapsed = time.time() - start_time
@@ -456,10 +627,11 @@ class AzureAIHandler:
                             currency_note = self._currency_note_from_ocr(processed_bytes, remaining, confirmed=True)
                         else:
                             if remaining > 1.4:
-                                objects = self._analyze_objects(
-                                    processed_bytes,
-                                    timeout_seconds=min(self.request_timeout, remaining)
-                                )
+                                if objects is None:
+                                    objects = self._analyze_objects(
+                                        processed_bytes,
+                                        timeout_seconds=min(self.request_timeout, remaining)
+                                    )
                                 if self._objects_hint_currency(objects):
                                     remaining = self.total_budget - (time.time() - start_time)
                                     if remaining > 0.8:
@@ -473,12 +645,23 @@ class AzureAIHandler:
 
                     if currency_note:
                         formatted = f"{formatted} {currency_note}"
+
+                    # If we didn't override with interpreted text, append a short interpreted add-on.
+                    if not desc_short and not interpreted and objects is None and remaining > 0.8:
+                        objects = self._analyze_objects(
+                            processed_bytes,
+                            timeout_seconds=min(self.request_timeout, remaining)
+                        )
+                        interpreted = interpret_azure_objects(objects, width, _height, max_sentences=1)
+
+                    if not desc_short and interpreted:
+                        formatted = self._merge_descriptions(formatted, interpreted, max_sentences=3)
                 elif mode == 'ocr':
                     raw = self._read_text(processed_bytes)
                     formatted = self._format_ocr(raw)
                 elif mode == 'search':
                     raw = self._analyze_objects(processed_bytes)
-                    formatted = self._format_search(raw, width, query=query)
+                    formatted = self._format_search(raw, width, _height, query=query)
                 else:
                     formatted = "Unsupported mode."
 
