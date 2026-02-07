@@ -1,16 +1,18 @@
 """
 Smart Vision Guide - Main Application (Pi Zero 2W Optimized)
-Assistive device for visually impaired users with 4 modes:
+Assistive device for visually impaired users with 6 modes:
 - Describe: Scene description
 - OCR: Text reading
 - Face: Face recognition
 - Search: Object search
+- Navigation: GPS turn-by-turn guidance to home
+- Help: Send emergency location to relatives
 
 2-Button Interface:
 - Button 1 (GPIO 17): Mode Toggle - Cycles through modes
 - Button 2 (GPIO 27): Select - Executes current mode / Power on at startup
 
-Mode Cycling: Describe → OCR → Face → Search → Shutdown → (repeat)
+Mode Cycling: Describe → OCR → Face → Search → Navigation → Help → Shutdown → (repeat)
 
 Optimizations for Pi Zero 2W:
 - Watchdog timer for hung operations
@@ -38,7 +40,11 @@ from config import (
     # Ultrasonic sensor configuration
     ENABLE_ULTRASONIC, ULTRASONIC_TRIGGER_PIN, ULTRASONIC_ECHO_PIN,
     BUZZER_PIN, ULTRASONIC_ALERT_DISTANCE, ULTRASONIC_DANGER_DISTANCE,
-    BUZZER_FREQUENCY, ULTRASONIC_CHECK_INTERVAL
+    BUZZER_FREQUENCY, ULTRASONIC_CHECK_INTERVAL,
+    # GPS configuration
+    ENABLE_GPS_MODES, PHYPHOX_URL, HOME_LAT, HOME_LON,
+    NTFY_TOPIC, RELATIVES, GPS_CHECK_INTERVAL,
+    ENABLE_NAVIGATION_MODE, ENABLE_HELP_MODE
 )
 from handlers.camera_handler import CameraHandler
 from handlers.audio_handler import AudioHandler
@@ -59,7 +65,7 @@ class SmartVision:
     """Main Smart Vision Guide application with 2-button interface."""
     
     # Mode definitions with circular ordering
-    MODE_SEQUENCE = ['describe', 'ocr', 'face', 'search', 'shutdown']
+    MODE_SEQUENCE = ['describe', 'ocr', 'face', 'search', 'navigation', 'help', 'shutdown']
     
     MODES = {
         'describe': {
@@ -81,6 +87,16 @@ class SmartVision:
             'name': 'Search',
             'announcement': 'Search mode',
             'description': 'Find objects'
+        },
+        'navigation': {
+            'name': 'Navigation',
+            'announcement': 'Navigation mode. Press select to start walking home.',
+            'description': 'GPS navigation to home'
+        },
+        'help': {
+            'name': 'Help',
+            'announcement': 'Help mode. Press select to send your location to family.',
+            'description': 'Send emergency location'
         },
         'shutdown': {
             'name': 'Shutdown',
@@ -187,6 +203,28 @@ class SmartVision:
         else:
             print("⚠️  Ultrasonic obstacle detection disabled in config")
         
+        # Initialize GPS handler for Navigation and Help modes
+        self.gps = None
+        if ENABLE_GPS_MODES:
+            try:
+                from handlers.gps_handler import GPSHandler
+                self.gps = GPSHandler(
+                    audio_handler=self.audio,
+                    phyphox_url=PHYPHOX_URL,
+                    home_lat=HOME_LAT,
+                    home_lon=HOME_LON,
+                    ntfy_topic=NTFY_TOPIC,
+                    relatives=RELATIVES,
+                    check_interval=GPS_CHECK_INTERVAL
+                )
+                print("✓ GPS handler initialized for Navigation and Help modes")
+            except Exception as e:
+                print(f"⚠️  GPS handler not available: {e}")
+                print("   Navigation and Help modes will not work.")
+                self.gps = None
+        else:
+            print("⚠️  GPS modes disabled in config")
+        
         # Setup GPIO
         self._setup_gpio()
         
@@ -275,6 +313,10 @@ class SmartVision:
         # Execute based on selected mode
         if self.selected_mode == 'shutdown':
             self._shutdown()
+        elif self.selected_mode == 'navigation':
+            self._run_navigation()
+        elif self.selected_mode == 'help':
+            self._run_help()
         else:
             threading.Thread(target=self._run_analysis, 
                            kwargs={'mode': self.selected_mode}, 
@@ -533,6 +575,42 @@ class SmartVision:
         except Exception:
             pass
 
+    def _run_navigation(self):
+        """Run GPS navigation to home."""
+        if not self.gps:
+            self.audio.say("GPS navigation is not available. Please check Phyphox connection.")
+            return
+        
+        if self.gps.navigation_active:
+            # If navigation is already running, stop it
+            self.gps.stop_navigation()
+        else:
+            # Start navigation in background thread
+            self.analysis_in_progress = True
+            threading.Thread(target=self._navigation_thread, daemon=True).start()
+    
+    def _navigation_thread(self):
+        """Background thread for navigation."""
+        try:
+            self.gps.start_navigation()  # Runs synchronously until complete/stopped
+        except Exception as e:
+            print(f"Navigation error: {e}")
+            self.audio.say("Navigation encountered an error.")
+        finally:
+            self.analysis_in_progress = False
+    
+    def _run_help(self):
+        """Send emergency help notification with location."""
+        if not self.gps:
+            self.audio.say("Help mode is not available. Please check Phyphox connection.")
+            return
+        
+        self.analysis_in_progress = True
+        try:
+            self.gps.send_help()
+        finally:
+            self.analysis_in_progress = False
+
     def _shutdown(self):
         """Shutdown the system gracefully."""
         print("🔴 Shutting down...")
@@ -587,6 +665,13 @@ class SmartVision:
     def _cleanup(self):
         """Cleanup resources."""
         print("Cleaning up...")
+        
+        # Stop GPS navigation if running
+        if self.gps:
+            try:
+                self.gps.cleanup()
+            except Exception:
+                pass
         
         # Stop ultrasonic monitoring
         if self.ultrasonic:

@@ -151,6 +151,32 @@ SEARCH_OBJECTS = [
 ]
 
 # ===============================================
+# GPS Navigation + Help Configuration
+# ===============================================
+
+# Enable GPS-based modes (Navigation and Help)
+ENABLE_GPS_MODES = os.getenv('ENABLE_GPS_MODES', 'true').lower() == 'true'
+
+# Phyphox app GPS endpoint (phone connected via WiFi hotspot)
+# Format: http://<phone-ip>:8080/get?lat&lon&v
+PHYPHOX_URL = os.getenv('PHYPHOX_URL', 'http://192.168.1.108:8080/get?lat&lon&v').strip()
+
+# Home coordinates (destination for navigation)
+HOME_LAT = float(os.getenv('HOME_LAT', '27.688441946480275'))
+HOME_LON = float(os.getenv('HOME_LON', '85.33542229999999'))
+
+# ntfy.sh configuration for Help mode
+# Relatives install ntfy app and subscribe to this topic to receive alerts
+NTFY_TOPIC = os.getenv('NTFY_TOPIC', 'smart-vision-help-2026').strip()
+
+# Relatives list (comma-separated names for notification messages)
+RELATIVES_STR = os.getenv('RELATIVES', 'Family Member 1,Family Member 2').strip()
+RELATIVES = [name.strip() for name in RELATIVES_STR.split(',') if name.strip()]
+
+# GPS check interval during navigation (seconds)
+GPS_CHECK_INTERVAL = float(os.getenv('GPS_CHECK_INTERVAL', '2.0'))
+
+# ===============================================
 # System Optimization
 # ===============================================
 
@@ -166,6 +192,8 @@ ENABLE_DESCRIBE_MODE = os.getenv('ENABLE_DESCRIBE_MODE', 'true').lower() == 'tru
 ENABLE_OCR_MODE = os.getenv('ENABLE_OCR_MODE', 'true').lower() == 'true'
 ENABLE_FACE_MODE = os.getenv('ENABLE_FACE_MODE', 'true').lower() == 'true'
 ENABLE_SEARCH_MODE = os.getenv('ENABLE_SEARCH_MODE', 'true').lower() == 'true'
+ENABLE_NAVIGATION_MODE = os.getenv('ENABLE_NAVIGATION_MODE', 'true').lower() == 'true'
+ENABLE_HELP_MODE = os.getenv('ENABLE_HELP_MODE', 'true').lower() == 'true'
 
 
 def get_system_info():
@@ -173,6 +201,7 @@ def get_system_info():
     return {
         'azure_vision_configured': bool(AZURE_VISION_ENDPOINT and AZURE_VISION_KEY),
         'azure_foundry_configured': bool(AZURE_FOUNDRY_ENDPOINT and AZURE_FOUNDRY_KEY),
+        'gps_configured': bool(PHYPHOX_URL and ENABLE_GPS_MODES),
         'local_vision_only': LOCAL_VISION_ONLY,
         'local_model_dir': LOCAL_MODEL_DIR,
         'tts_backend': TTS_BACKEND,
@@ -209,6 +238,13 @@ if __name__ == '__main__':
     print(f"  OCR:          {'✓' if ENABLE_OCR_MODE else '✗'}")
     print(f"  Face:         {'✓' if ENABLE_FACE_MODE else '✗'}")
     print(f"  Search:       {'✓' if ENABLE_SEARCH_MODE else '✗'}")
+    print(f"  Navigation:   {'✓' if ENABLE_NAVIGATION_MODE else '✗'}")
+    print(f"  Help:         {'✓' if ENABLE_HELP_MODE else '✗'}")
+    print(f"\n📍 GPS Configuration:")
+    print(f"  Phyphox URL:  {PHYPHOX_URL}")
+    print(f"  Home:         {HOME_LAT}, {HOME_LON}")
+    print(f"  ntfy Topic:   {NTFY_TOPIC}")
+    print(f"  Relatives:    {', '.join(RELATIVES)}")
     print("\n" + "=" * 50)
     print(f"  JPEG Quality: {IMAGE_JPEG_QUALITY}%")
 
