@@ -10,11 +10,11 @@ load_dotenv()
 AZURE_VISION_ENDPOINT = os.getenv('AZURE_VISION_ENDPOINT', '').strip()
 AZURE_VISION_KEY = os.getenv('AZURE_VISION_KEY', '').strip()
 
-# Azure OpenAI Configuration (for scene description)
-AZURE_OPENAI_ENDPOINT = os.getenv('AZURE_OPENAI_ENDPOINT', '').strip()
-AZURE_OPENAI_KEY = os.getenv('AZURE_OPENAI_KEY', '').strip()
-AZURE_OPENAI_DEPLOYMENT = os.getenv('AZURE_OPENAI_DEPLOYMENT', 'gpt-4o').strip()
-AZURE_OPENAI_API_VERSION = os.getenv('AZURE_OPENAI_API_VERSION', '2024-02-15-preview').strip()
+# Azure AI Foundry Configuration (for scene description)
+# Endpoint format: https://<resource-name>.services.ai.azure.com
+AZURE_FOUNDRY_ENDPOINT = os.getenv('AZURE_FOUNDRY_ENDPOINT', '').strip()
+AZURE_FOUNDRY_KEY = os.getenv('AZURE_FOUNDRY_KEY', '').strip()
+AZURE_FOUNDRY_MODEL = os.getenv('AZURE_FOUNDRY_MODEL', 'gpt-4o').strip()
 
 # ===============================================
 # Local / Offline Vision Configuration
@@ -172,7 +172,7 @@ def get_system_info():
     """Get system information for debugging."""
     return {
         'azure_vision_configured': bool(AZURE_VISION_ENDPOINT and AZURE_VISION_KEY),
-        'azure_openai_configured': bool(AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_KEY),
+        'azure_foundry_configured': bool(AZURE_FOUNDRY_ENDPOINT and AZURE_FOUNDRY_KEY),
         'local_vision_only': LOCAL_VISION_ONLY,
         'local_model_dir': LOCAL_MODEL_DIR,
         'tts_backend': TTS_BACKEND,
@@ -186,7 +186,7 @@ if __name__ == '__main__':
     print("=" * 50)
     info = get_system_info()
     print(f"\n🔧 API Configuration:")
-    print(f"  Azure OpenAI (Describe): {'✓ Configured' if info['azure_openai_configured'] else '✗ Not configured'}")
+    print(f"  Azure AI Foundry (Describe): {'✓ Configured' if info['azure_foundry_configured'] else '✗ Not configured'}")
     print(f"  Azure Vision (OCR/Search): {'✓ Configured' if info['azure_vision_configured'] else '✗ Not configured'}")
     print(f"\n🧠 Local Vision:")
     print(f"  Offline Only: {info['local_vision_only']}")

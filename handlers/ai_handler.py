@@ -1,6 +1,6 @@
 """
 AI Handler for Smart Vision Guide.
-Uses Azure OpenAI (GPT-4 Vision) for scene description and Azure Computer Vision for OCR/Search.
+Uses Azure AI Foundry (GPT-4 Vision) for scene description and Azure Computer Vision for OCR/Search.
 Optimized for Raspberry Pi Zero 2W with retry logic, reduced payload, and fast fallbacks.
 """
 
@@ -12,7 +12,7 @@ import requests
 from PIL import Image
 from config import (
     AZURE_VISION_ENDPOINT, AZURE_VISION_KEY,
-    AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION,
+    AZURE_FOUNDRY_ENDPOINT, AZURE_FOUNDRY_KEY, AZURE_FOUNDRY_MODEL,
     REQUEST_TIMEOUT, IMAGE_MAX_WIDTH, IMAGE_JPEG_QUALITY, SEARCH_OBJECTS,
     ENABLE_PREPROCESSING, RETRY_ATTEMPTS, RETRY_DELAY
 )
@@ -186,23 +186,22 @@ class AzureAPIError(RuntimeError):
 
 
 class AzureAIHandler:
-    """Handler for image analysis using Azure OpenAI (describe) and Azure Computer Vision (OCR/search)."""
+    """Handler for image analysis using Azure AI Foundry (describe) and Azure Computer Vision (OCR/search)."""
 
     # Azure Computer Vision paths (for OCR and search)
     ANALYZE_PATH = "/vision/v3.2/analyze"
     READ_PATH = "/vision/v3.2/read/analyze"
 
     def __init__(self, retry_attempts=RETRY_ATTEMPTS, retry_delay=RETRY_DELAY):
-        # Check Azure OpenAI configuration for describe mode
-        self.openai_available = bool(AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_KEY and AZURE_OPENAI_DEPLOYMENT)
-        if self.openai_available:
-            self.openai_endpoint = AZURE_OPENAI_ENDPOINT.rstrip("/")
-            self.openai_key = AZURE_OPENAI_KEY
-            self.openai_deployment = AZURE_OPENAI_DEPLOYMENT
-            self.openai_api_version = AZURE_OPENAI_API_VERSION
-            print("OK: Azure OpenAI configured for scene description")
+        # Check Azure AI Foundry configuration for describe mode
+        self.foundry_available = bool(AZURE_FOUNDRY_ENDPOINT and AZURE_FOUNDRY_KEY)
+        if self.foundry_available:
+            self.foundry_endpoint = AZURE_FOUNDRY_ENDPOINT.rstrip("/")
+            self.foundry_key = AZURE_FOUNDRY_KEY
+            self.foundry_model = AZURE_FOUNDRY_MODEL
+            print("OK: Azure AI Foundry configured for scene description")
         else:
-            print("WARN: Azure OpenAI not configured. Describe mode will use fallback.")
+            print("WARN: Azure AI Foundry not configured. Describe mode will use fallback.")
 
         # Check Azure Vision configuration for OCR/search
         self.vision_available = bool(AZURE_VISION_ENDPOINT and AZURE_VISION_KEY)
@@ -219,8 +218,8 @@ class AzureAIHandler:
         else:
             print("WARN: Azure Computer Vision not configured. OCR/search will use offline fallback.")
 
-        if not self.openai_available and not self.vision_available:
-            raise RuntimeError("Neither Azure OpenAI nor Azure Computer Vision is configured. Please set environment variables.")
+        if not self.foundry_available and not self.vision_available:
+            raise RuntimeError("Neither Azure AI Foundry nor Azure Computer Vision is configured. Please set environment variables.")
 
         self.retry_attempts = retry_attempts
         self.retry_delay = retry_delay
@@ -301,7 +300,7 @@ class AzureAIHandler:
         msg_lower = (msg or "").lower()
 
         if status in (401, 403):
-            service = "Azure OpenAI" if is_openai else "Azure Vision"
+            service = "Azure AI Foundry" if is_openai else "Azure Vision"
             raise AzureAPIError(
                 f"{service} authorization failed. Please check your API key.",
                 retryable=False,
@@ -325,23 +324,25 @@ class AzureAIHandler:
 
         raise AzureAPIError("Online request failed.", retryable=False)
 
-    def _describe_with_openai(self, image_bytes, timeout_seconds=None):
-        """Use Azure OpenAI GPT-4 Vision to describe the scene for blind assistance."""
-        if not self.openai_available:
-            raise AzureAPIError("Azure OpenAI not configured.", retryable=False)
+    def _describe_with_foundry(self, image_bytes, timeout_seconds=None):
+        """Use Azure AI Foundry to describe the scene for blind assistance."""
+        if not self.foundry_available:
+            raise AzureAPIError("Azure AI Foundry not configured.", retryable=False)
 
         # Encode image to base64
         base64_image = base64.b64encode(image_bytes).decode('utf-8')
 
-        # Build the API URL
-        url = f"{self.openai_endpoint}/openai/deployments/{self.openai_deployment}/chat/completions?api-version={self.openai_api_version}"
+        # Build the API URL for Azure AI Foundry
+        # Format: https://<resource>.services.ai.azure.com/models/chat/completions
+        url = f"{self.foundry_endpoint}/models/chat/completions"
 
         headers = {
             "Content-Type": "application/json",
-            "api-key": self.openai_key
+            "Authorization": f"Bearer {self.foundry_key}"
         }
 
         payload = {
+            "model": self.foundry_model,
             "messages": [
                 {
                     "role": "system",
@@ -576,12 +577,12 @@ class AzureAIHandler:
                     progress_callback(f"Retry attempt {attempt}")
 
                 if mode == 'describe':
-                    # Use Azure OpenAI for scene description
-                    if not self.openai_available:
-                        msg = "Azure OpenAI is not configured for scene description."
+                    # Use Azure AI Foundry for scene description
+                    if not self.foundry_available:
+                        msg = "Azure AI Foundry is not configured for scene description."
                         return (False, msg) if return_status else msg
                     
-                    formatted = self._describe_with_openai(processed_bytes)
+                    formatted = self._describe_with_foundry(processed_bytes)
                     formatted = self._shorten(formatted, 300)
 
                 elif mode == 'ocr':
