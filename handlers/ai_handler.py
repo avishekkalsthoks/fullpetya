@@ -77,10 +77,10 @@ def interpret_azure_objects(objects_json, image_width, image_height, max_sentenc
             return None
         ratio = (w * h) / image_area
         if ratio >= 0.20:
-            return "very close"
+            return "very close, about 1 arm length (2-3 feet)"
         if ratio >= 0.07:
-            return "a few steps away"
-        return "far away"
+            return "close, about 2 arm lengths (4-6 feet)"
+        return "farther, 3+ arm lengths (7+ feet)"
 
     def is_plural(name_lower):
         if name_lower in {"people", "stairs", "steps"}:
