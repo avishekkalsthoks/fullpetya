@@ -34,7 +34,11 @@ from config import (
     SEARCH_DEFAULT_QUERY, STT_BACKEND,
     CAMERA_JPEG_QUALITY,
     SAVE_CAPTURES, CAPTURE_DIR, CAPTURE_MAX_FILES,
-    ENABLE_GARBAGE_COLLECTION
+    ENABLE_GARBAGE_COLLECTION,
+    # Ultrasonic sensor configuration
+    ENABLE_ULTRASONIC, ULTRASONIC_TRIGGER_PIN, ULTRASONIC_ECHO_PIN,
+    BUZZER_PIN, ULTRASONIC_ALERT_DISTANCE, ULTRASONIC_DANGER_DISTANCE,
+    BUZZER_FREQUENCY, ULTRASONIC_CHECK_INTERVAL
 )
 from handlers.camera_handler import CameraHandler
 from handlers.audio_handler import AudioHandler
@@ -161,6 +165,27 @@ class SmartVision:
             print("   Face mode will not work.")
             print("   Please ensure python3-opencv with face module is installed and faces/ folder exists.")
             self.face = None
+        
+        # Initialize ultrasonic sensor handler
+        self.ultrasonic = None
+        if ENABLE_ULTRASONIC:
+            try:
+                from handlers.ultrasonic_handler import UltrasonicHandler
+                self.ultrasonic = UltrasonicHandler(
+                    trigger_pin=ULTRASONIC_TRIGGER_PIN,
+                    echo_pin=ULTRASONIC_ECHO_PIN,
+                    buzzer_pin=BUZZER_PIN,
+                    alert_distance=ULTRASONIC_ALERT_DISTANCE,
+                    danger_distance=ULTRASONIC_DANGER_DISTANCE,
+                    check_interval=ULTRASONIC_CHECK_INTERVAL,
+                    buzzer_frequency=BUZZER_FREQUENCY
+                )
+                print("✓ Ultrasonic obstacle detection initialized")
+            except Exception as e:
+                print(f"⚠️  Ultrasonic sensor not available: {e}")
+                self.ultrasonic = None
+        else:
+            print("⚠️  Ultrasonic obstacle detection disabled in config")
         
         # Setup GPIO
         self._setup_gpio()
@@ -369,7 +394,18 @@ class SmartVision:
         query_norm = (query or "").strip().lower()
         query_for_ai = None if query_norm in ("", "auto", "scan") else query
 
-        use_online = self.ai is not None and not LOCAL_VISION_ONLY and not getattr(self.ai, "quota_exhausted", False)
+        # Determine if we should try online mode
+        use_online = (
+            self.ai is not None 
+            and not LOCAL_VISION_ONLY 
+            and not getattr(self.ai, "quota_exhausted", False)
+        )
+        
+        # If LOCAL_VISION_ONLY is explicitly set, skip online entirely
+        if LOCAL_VISION_ONLY:
+            print("📴 LOCAL_VISION_ONLY is enabled, using offline mode.")
+            use_online = False
+        
         if use_online:
             self.audio.say("Analyzing online. Please wait.")
 
@@ -390,10 +426,12 @@ class SmartVision:
                     self.audio.say(result)
                     return
                 print("⚠️  Online analysis failed, falling back to offline.")
+                self.audio.say("Online failed. Switching to offline.")
             except Exception as e:
                 print(f"⚠️  Online analysis error: {e}")
+                self.audio.say("Online error. Switching to offline.")
         elif self.ai is not None and getattr(self.ai, "quota_exhausted", False):
-            self.audio.say("Online quota is exhausted. Switching to offline analysis.")
+            self.audio.say("Online quota exhausted. Using offline.")
 
         # Offline fallback
         if not self.local_vision:
@@ -402,7 +440,12 @@ class SmartVision:
 
         if analysis_id is not None and self._analysis_cancel[analysis_id].is_set():
             return
-        self.audio.say("Using offline analysis.")
+        
+        # Only announce offline if we're starting directly in offline mode
+        # (not if we already announced we're switching from online)
+        if LOCAL_VISION_ONLY:
+            self.audio.say("Analyzing offline. Please wait.")
+        
         if mode == 'describe':
             result = self.local_vision.describe_scene(image_bytes)
         elif mode == 'ocr':
@@ -511,6 +554,10 @@ class SmartVision:
 
     def run(self):
         """Main application loop."""
+        # Start ultrasonic monitoring if available
+        if self.ultrasonic:
+            self.ultrasonic.start_monitoring()
+        
         # Startup announcement
         self.audio.say("Smart Vision Guide ready.")
         time.sleep(0.5)
@@ -540,6 +587,14 @@ class SmartVision:
     def _cleanup(self):
         """Cleanup resources."""
         print("Cleaning up...")
+        
+        # Stop ultrasonic monitoring
+        if self.ultrasonic:
+            try:
+                self.ultrasonic.cleanup()
+            except Exception:
+                pass
+        
         try:
             self.camera.stop()
         except Exception:

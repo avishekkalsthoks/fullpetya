@@ -1,361 +1,655 @@
 """
-AI Handler for Smart Vision Guide
-Optimized for Raspberry Pi Zero 2W with retry logic, reduced payload, and progress feedback.
+AI Handler for Smart Vision Guide.
+Uses Azure OpenAI (GPT-4 Vision) for scene description and Azure Computer Vision for OCR/Search.
+Optimized for Raspberry Pi Zero 2W with retry logic, reduced payload, and fast fallbacks.
 """
 
-import requests
-import base64
 import io
 import time
+import re
+import base64
+import requests
 from PIL import Image
 from config import (
-    OPENROUTER_API_KEY, OPENROUTER_API_URL, OPENROUTER_MODEL,
-    OPENROUTER_SITE_URL, OPENROUTER_SITE_NAME,
+    AZURE_VISION_ENDPOINT, AZURE_VISION_KEY,
+    AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION,
     REQUEST_TIMEOUT, IMAGE_MAX_WIDTH, IMAGE_JPEG_QUALITY, SEARCH_OBJECTS,
-    ENABLE_PREPROCESSING
+    ENABLE_PREPROCESSING, RETRY_ATTEMPTS, RETRY_DELAY
 )
 
+# System prompt for Azure OpenAI scene description (blind assistance)
+SCENE_DESCRIPTION_PROMPT = """You are an assistive AI helping a blind person understand their surroundings and walk safely.
 
-class AIHandler:
-    """Handler for AI image analysis using OpenRouter API with Pi Zero optimizations."""
-    
-    def __init__(self, retry_attempts=2, retry_delay=2.0):
-        """
-        Initialize AI handler.
-        
-        Args:
-            retry_attempts: Number of retry attempts for failed API calls
-            retry_delay: Delay between retries in seconds
-        """
-        if not OPENROUTER_API_KEY:
-            raise RuntimeError("OPENROUTER_API_KEY is missing in environment variables.")
-        
-        self.headers = {
-            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        
-        # Add optional site tracking headers for OpenRouter rankings
-        if OPENROUTER_SITE_URL:
-            self.headers["HTTP-Referer"] = OPENROUTER_SITE_URL
-        if OPENROUTER_SITE_NAME:
-            self.headers["X-Title"] = OPENROUTER_SITE_NAME
+First, identify the environment:
+- Say if the person is in a room, road, street, corridor, shop, or outdoor area.
+
+Then describe ONLY important things:
+- Obstacles
+- People
+- Doors
+- Stairs
+- Vehicles
+- Safe walking path
+
+For each important object:
+- Mention what it is
+- Mention direction (ahead, left, right)
+- Estimate distance using:
+  - Very close (under 1 meter)
+  - About 1 meter
+  - About 2–3 meters
+  - Far
+
+Rules:
+- Start with: "You are in a ..."
+- Mention the most important or dangerous object first
+- Keep response short and practical
+- Maximum 3–4 sentences
+- Ignore colors and unimportant details
+- Focus on safety and navigation"""
+
+
+def interpret_azure_objects(objects_json, image_width, image_height, max_sentences=3):
+    """
+    Convert Azure object detections into short, spatially-aware sentences.
+    Returns an empty string if nothing meaningful can be produced.
+    """
+    if not objects_json or not image_width or not image_height:
+        return ""
+
+    try:
+        image_area = float(image_width * image_height)
+    except Exception:
+        return ""
+
+    if image_area <= 0:
+        return ""
+
+    critical = {
+        "person", "people", "door", "stairs", "staircase", "step", "steps", "curb",
+        "edge", "wall", "window", "glass", "pole", "post", "sign", "stop sign",
+        "traffic light", "vehicle", "car", "bus", "truck", "bicycle", "bike",
+        "motorcycle", "train", "dog", "cat"
+    }
+    large_furniture = {
+        "table", "chair", "bed", "sofa", "couch", "desk", "bench",
+        "cabinet", "closet", "wardrobe", "refrigerator", "fridge",
+        "sink", "toilet", "tv"
+    }
+
+    def priority_rank(name_lower):
+        if name_lower in critical:
+            return 0
+        if name_lower in large_furniture:
+            return 1
+        return 2
+
+    def position_label(rect):
+        if not rect:
+            return None
+        try:
+            x = float(rect.get("x", 0))
+            w = float(rect.get("w", 0))
+            center = x + (w / 2.0)
+        except Exception:
+            return None
+
+        if center < image_width * 0.33:
+            return "left"
+        if center > image_width * 0.66:
+            return "right"
+        return "center"
+
+    def distance_label(rect):
+        if not rect:
+            return None
+        try:
+            w = float(rect.get("w", 0))
+            h = float(rect.get("h", 0))
+        except Exception:
+            return None
+        if w <= 0 or h <= 0:
+            return None
+        ratio = (w * h) / image_area
+        if ratio >= 0.20:
+            return "very close, about 1 arm length (2-3 feet)"
+        if ratio >= 0.07:
+            return "close, about 2 arm lengths (4-6 feet)"
+        return "farther, 3+ arm lengths (7+ feet)"
+
+    def is_plural(name_lower):
+        if name_lower in {"people", "stairs", "steps"}:
+            return True
+        return name_lower.endswith("s") and not name_lower.endswith("ss")
+
+    def article_for(name_lower):
+        return "an" if name_lower[:1] in {"a", "e", "i", "o", "u"} else "a"
+
+    parsed = []
+    for obj in objects_json:
+        name = (obj.get("object") or "").strip()
+        if not name:
+            continue
+        name_lower = name.lower()
+        parsed.append({
+            "name": name_lower,
+            "display": name_lower,
+            "confidence": float(obj.get("confidence", 0) or 0),
+            "rect": obj.get("rectangle") or {}
+        })
+
+    if not parsed:
+        return ""
+
+    parsed.sort(key=lambda o: (priority_rank(o["name"]), -o["confidence"]))
+
+    sentences = []
+    seen = set()
+    for obj in parsed:
+        if obj["name"] in seen:
+            continue
+        seen.add(obj["name"])
+
+        pos = position_label(obj["rect"])
+        dist = distance_label(obj["rect"])
+
+        if pos == "center":
+            location = "in front of you"
+        elif pos in {"left", "right"}:
+            location = f"to your {pos}"
+        else:
+            location = "nearby"
+
+        if is_plural(obj["name"]):
+            sentence = f"There are {obj['display']} {location}"
+        else:
+            sentence = f"There is {article_for(obj['name'])} {obj['display']} {location}"
+
+        if dist:
+            sentence = f"{sentence}, {dist}."
+        else:
+            sentence = f"{sentence}."
+
+        sentences.append(sentence)
+        if len(sentences) >= max_sentences:
+            break
+
+    return " ".join(sentences)
+
+
+class AzureAPIError(RuntimeError):
+    def __init__(self, message, retryable=False, quota=False, auth=False):
+        super().__init__(message)
+        self.retryable = retryable
+        self.quota = quota
+        self.auth = auth
+
+
+class AzureAIHandler:
+    """Handler for image analysis using Azure OpenAI (describe) and Azure Computer Vision (OCR/search)."""
+
+    # Azure Computer Vision paths (for OCR and search)
+    ANALYZE_PATH = "/vision/v3.2/analyze"
+    READ_PATH = "/vision/v3.2/read/analyze"
+
+    def __init__(self, retry_attempts=RETRY_ATTEMPTS, retry_delay=RETRY_DELAY):
+        # Check Azure OpenAI configuration for describe mode
+        self.openai_available = bool(AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_KEY and AZURE_OPENAI_DEPLOYMENT)
+        if self.openai_available:
+            self.openai_endpoint = AZURE_OPENAI_ENDPOINT.rstrip("/")
+            self.openai_key = AZURE_OPENAI_KEY
+            self.openai_deployment = AZURE_OPENAI_DEPLOYMENT
+            self.openai_api_version = AZURE_OPENAI_API_VERSION
+            print("OK: Azure OpenAI configured for scene description")
+        else:
+            print("WARN: Azure OpenAI not configured. Describe mode will use fallback.")
+
+        # Check Azure Vision configuration for OCR/search
+        self.vision_available = bool(AZURE_VISION_ENDPOINT and AZURE_VISION_KEY)
+        if self.vision_available:
+            self.vision_endpoint = AZURE_VISION_ENDPOINT.rstrip("/")
+            self.vision_headers = {
+                "Ocp-Apim-Subscription-Key": AZURE_VISION_KEY,
+                "Content-Type": "application/octet-stream"
+            }
+            self.poll_headers = {
+                "Ocp-Apim-Subscription-Key": AZURE_VISION_KEY
+            }
+            print("OK: Azure Computer Vision configured for OCR/search")
+        else:
+            print("WARN: Azure Computer Vision not configured. OCR/search will use offline fallback.")
+
+        if not self.openai_available and not self.vision_available:
+            raise RuntimeError("Neither Azure OpenAI nor Azure Computer Vision is configured. Please set environment variables.")
+
         self.retry_attempts = retry_attempts
         self.retry_delay = retry_delay
-        self.last_successful_response = None  # Cache for fallback
+        self.last_successful_response = None
         self.quota_exhausted = False
 
-    def _preprocess_image(self, image_bytes: bytes) -> bytes:
+        # Keep online requests bounded while allowing a longer fallback window.
+        max_budget = float(REQUEST_TIMEOUT)
+        self.total_budget = min(max_budget, 15.0)  # Increased for OpenAI
+        self.request_timeout = min(max_budget, 12.0)  # Increased for OpenAI
+        self.timeout_tuple = (self.request_timeout, self.request_timeout)
+        self.read_poll_interval = 0.35
+
+        self.session = requests.Session()
+
+    def _build_vision_url(self, path):
+        return f"{self.vision_endpoint}{path}"
+
+    def _timeout_tuple(self, timeout_seconds=None):
+        if not timeout_seconds:
+            return self.timeout_tuple
+        return (timeout_seconds, timeout_seconds)
+
+    def _prepare_image(self, image_bytes):
         """
-        Resize and compress image to reduce payload size for Pi Zero 2 W compatibility.
-        
-        Optimizations:
-        - Reduced max width from 640 to match camera output
-        - Quality reduced to minimize upload size
+        Resize and compress image to reduce payload size for Pi Zero 2W.
+        Returns (jpeg_bytes, width, height) for the processed image.
         """
-        if not ENABLE_PREPROCESSING:
-            return image_bytes
         try:
             img = Image.open(io.BytesIO(image_bytes))
-            
-            # Resize if width exceeds max
-            if IMAGE_MAX_WIDTH > 0 and img.width > IMAGE_MAX_WIDTH:
-                ratio = IMAGE_MAX_WIDTH / float(img.width)
-                new_height = int(float(img.height) * ratio)
-                img = img.resize((IMAGE_MAX_WIDTH, new_height), Image.Resampling.LANCZOS)
-            
-            # Convert to RGB if necessary (e.g. if RGBA)
-            if img.mode != 'RGB':
-                img = img.convert('RGB')
-                
-            # Compress to JPEG
+            width, height = img.size
+            fmt = (img.format or "").upper()
+
+            needs_resize = ENABLE_PREPROCESSING and IMAGE_MAX_WIDTH > 0 and width > IMAGE_MAX_WIDTH
+            needs_convert = img.mode != "RGB"
+            needs_jpeg = fmt != "JPEG"
+
+            should_reencode = needs_resize or needs_convert or needs_jpeg or ENABLE_PREPROCESSING
+
+            if not should_reencode:
+                return image_bytes, width, height
+
+            if needs_resize:
+                ratio = IMAGE_MAX_WIDTH / float(width)
+                new_height = int(float(height) * ratio)
+                resample = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
+                img = img.resize((IMAGE_MAX_WIDTH, new_height), resample)
+                width, height = img.size
+
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+
             buffer = io.BytesIO()
             img.save(buffer, format="JPEG", quality=IMAGE_JPEG_QUALITY)
-            compressed = buffer.getvalue()
-            
-            print(f"✓ Image preprocessed: {len(image_bytes)} → {len(compressed)} bytes")
-            return compressed
-            
-        except Exception as e:
-            print(f"Error during image preprocessing: {e}")
-            return image_bytes
+            return buffer.getvalue(), width, height
+        except Exception:
+            return image_bytes, None, None
 
-    def _build_payload(self, image_bytes: bytes, mode: str, query: str = None) -> dict:
-        """
-        Build the API payload based on the analysis mode.
-        
-        Args:
-            image_bytes: Raw image bytes
-            mode: One of 'describe', 'ocr', 'search'
-            query: Optional query for search mode
-        """
-        processed_bytes = self._preprocess_image(image_bytes)
-        b64_image = base64.b64encode(processed_bytes).decode('utf-8')
-        data_url = f"data:image/jpeg;base64,{b64_image}"
-        
-        # Enhanced prompts for better assistive experience
-        prompts = {
-            'describe': (
-                "You are assisting a blind person. Describe the scene in 2 to 3 short sentences. "
-                "Mention people, key objects, and any obstacles. "
-                "Give relative positions (left, center, right) and approximate distance "
-                "in steps or arm-lengths when possible. Be concise and actionable."
-            ),
-            'ocr': (
-                "You are reading text for a visually impaired person. "
-                "Extract ONLY the visible text in this image. "
-                "Preserve line breaks if it's a menu, sign, or label. "
-                "If no text, say 'No text detected.'"
-            ),
-            'search': (
-                f"You are helping a blind person find frequently needed items. "
-                f"Look for items such as: {', '.join(SEARCH_OBJECTS[:12])}. "
-                f"If you see any, say which item it is and give its position "
-                f"(left/center/right) and approximate distance (steps or arm-lengths). "
-                f"If none are present, say you don't see common items."
+    def _extract_error(self, response):
+        try:
+            data = response.json()
+        except Exception:
+            return response.text or ""
+
+        if isinstance(data, dict):
+            err = data.get("error") or {}
+            if isinstance(err, dict):
+                msg = err.get("message") or err.get("code") or ""
+                return msg
+        return str(data)
+
+    def _raise_for_status(self, response, is_openai=False):
+        status = response.status_code
+        if status < 400:
+            return
+
+        msg = self._extract_error(response)
+        msg_lower = (msg or "").lower()
+
+        if status in (401, 403):
+            service = "Azure OpenAI" if is_openai else "Azure Vision"
+            raise AzureAPIError(
+                f"{service} authorization failed. Please check your API key.",
+                retryable=False,
+                auth=True
             )
+
+        if status == 429:
+            if any(k in msg_lower for k in ["quota", "credit", "billing", "exceed"]):
+                raise AzureAPIError(
+                    "Online quota is exhausted. Please update your Azure plan or key.",
+                    retryable=False,
+                    quota=True
+                )
+            raise AzureAPIError(
+                "Online service is busy. Please try again.",
+                retryable=True
+            )
+
+        if status >= 500:
+            raise AzureAPIError("Online service error. Please try again.", retryable=True)
+
+        raise AzureAPIError("Online request failed.", retryable=False)
+
+    def _describe_with_openai(self, image_bytes, timeout_seconds=None):
+        """Use Azure OpenAI GPT-4 Vision to describe the scene for blind assistance."""
+        if not self.openai_available:
+            raise AzureAPIError("Azure OpenAI not configured.", retryable=False)
+
+        # Encode image to base64
+        base64_image = base64.b64encode(image_bytes).decode('utf-8')
+
+        # Build the API URL
+        url = f"{self.openai_endpoint}/openai/deployments/{self.openai_deployment}/chat/completions?api-version={self.openai_api_version}"
+
+        headers = {
+            "Content-Type": "application/json",
+            "api-key": self.openai_key
         }
-        
-        prompt = prompts.get(mode, prompts['describe'])
-        
-        # Add query context for search mode
-        if mode == 'search' and query:
-            prompt = (
-                f"You are helping a blind person search for '{query}'. "
-                f"If you see '{query}', say yes and give its position (left/center/right) "
-                f"and approximate distance in steps or arm-lengths. "
-                f"If you do not see it, say no and briefly mention the most important objects. "
-                f"Be concise and clear."
-            )
-        
-        # OpenRouter chat completions format with image_url
-        return {
-            "model": OPENROUTER_MODEL,
+
+        payload = {
             "messages": [
+                {
+                    "role": "system",
+                    "content": SCENE_DESCRIPTION_PROMPT
+                },
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": prompt
+                            "text": "Describe what you see in this image to help me navigate safely."
                         },
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": data_url
+                                "url": f"data:image/jpeg;base64,{base64_image}",
+                                "detail": "low"  # Use low detail for faster response
                             }
                         }
                     ]
                 }
             ],
-            "max_tokens": 150,
-            "temperature": 0.7
+            "max_tokens": 150,  # Keep response short
+            "temperature": 0.3  # More focused responses
         }
 
-    def analyze_image(self, image_bytes: bytes, mode: str = 'describe', query: str = None, progress_callback=None, return_status: bool = False):
-        """
-        Sends image to OpenRouter API and returns the generated text.
+        timeout = timeout_seconds or self.request_timeout
+        response = self.session.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=(timeout, timeout)
+        )
+        self._raise_for_status(response, is_openai=True)
+
+        result = response.json()
         
+        # Extract the response message
+        choices = result.get("choices", [])
+        if not choices:
+            return "I couldn't analyze the scene. Please try again."
+        
+        message = choices[0].get("message", {})
+        content = message.get("content", "").strip()
+        
+        if not content:
+            return "I couldn't understand what I'm seeing. Please try again."
+        
+        return content
+
+    def _analyze_objects(self, image_bytes, timeout_seconds=None):
+        """Use Azure Computer Vision to detect objects."""
+        if not self.vision_available:
+            return []
+
+        url = self._build_vision_url(self.ANALYZE_PATH)
+        params = {
+            "visualFeatures": "Objects",
+            "language": "en"
+        }
+        response = self.session.post(
+            url,
+            headers=self.vision_headers,
+            params=params,
+            data=image_bytes,
+            timeout=self._timeout_tuple(timeout_seconds)
+        )
+        self._raise_for_status(response)
+        result = response.json()
+        return result.get("objects", [])
+
+    def _read_text(self, image_bytes, budget_seconds=None, timeout_seconds=None):
+        """Use Azure Computer Vision OCR to read text."""
+        if not self.vision_available:
+            raise AzureAPIError("Azure Computer Vision not configured for OCR.", retryable=False)
+
+        url = self._build_vision_url(self.READ_PATH)
+        params = {
+            "language": "en"
+        }
+
+        budget = self.total_budget if budget_seconds is None else max(0.5, float(budget_seconds))
+        timeout = self.request_timeout if timeout_seconds is None else max(0.5, float(timeout_seconds))
+        timeout_tuple = self._timeout_tuple(timeout)
+        deadline = time.time() + budget
+        response = self.session.post(
+            url,
+            headers=self.vision_headers,
+            params=params,
+            data=image_bytes,
+            timeout=timeout_tuple
+        )
+        self._raise_for_status(response)
+
+        if response.status_code not in (200, 202):
+            raise AzureAPIError("Online OCR request failed.", retryable=True)
+
+        operation_location = response.headers.get("Operation-Location")
+        if not operation_location:
+            raise AzureAPIError("Online OCR response missing operation location.", retryable=True)
+
+        while time.time() < deadline:
+            poll = self.session.get(
+                operation_location,
+                headers=self.poll_headers,
+                timeout=timeout_tuple
+            )
+            self._raise_for_status(poll)
+            result = poll.json()
+            status = (result.get("status") or "").lower()
+
+            if status == "succeeded":
+                return result
+            if status == "failed":
+                raise AzureAPIError("Online OCR failed.", retryable=False)
+
+            time.sleep(self.read_poll_interval)
+
+        raise AzureAPIError("Online OCR timed out.", retryable=True)
+
+    def _shorten(self, text, max_chars=200):
+        text = " ".join(text.split()).strip()
+        if len(text) <= max_chars:
+            return text
+        cutoff = text.rfind(".", 0, max_chars)
+        if cutoff > 40:
+            return text[: cutoff + 1].strip()
+        return text[:max_chars].rstrip(".") + "."
+
+    def _position_label(self, rect, width):
+        if not rect or not width:
+            return None
+        x = rect.get("x", 0)
+        w = rect.get("w", 0)
+        center = x + (w / 2.0)
+        if center < width * 0.33:
+            return "left"
+        if center > width * 0.66:
+            return "right"
+        return "center"
+
+    def _parse_objects(self, objects):
+        parsed = []
+        for obj in objects or []:
+            name = (obj.get("object") or "").strip()
+            if not name:
+                continue
+            parsed.append({
+                "name": name,
+                "name_lower": name.lower(),
+                "confidence": float(obj.get("confidence", 0) or 0),
+                "rect": obj.get("rectangle") or {}
+            })
+        parsed.sort(key=lambda o: o["confidence"], reverse=True)
+        return parsed
+
+    def _format_ocr(self, result):
+        lines = []
+        analyze = result.get("analyzeResult", {})
+        for page in analyze.get("readResults", []):
+            for line in page.get("lines", []):
+                value = (line.get("text") or "").strip()
+                if value:
+                    lines.append(value)
+
+        if not lines:
+            return "I don't see any readable text in this image."
+
+        joined = " / ".join(lines)
+        joined = self._shorten(joined, 200)
+        return f"I can read: {joined}"
+
+    def _format_search(self, objects, width, height=None, query=None):
+        parsed = self._parse_objects(objects)
+        if query:
+            q = query.strip().lower()
+            if not q:
+                return "I don't see the requested item."
+            match = None
+            for obj in parsed:
+                name = obj["name_lower"]
+                if q in name or name in q or q.rstrip("s") == name:
+                    match = obj
+                    break
+            if match:
+                pos = self._position_label(match["rect"], width)
+                if pos:
+                    return f"Yes, I see {match['name']} on the {pos}."
+                return f"Yes, I see {match['name']}."
+            return f"No, I don't see {query}."
+
+        interpreted = interpret_azure_objects(objects, width, height)
+        if interpreted:
+            return interpreted
+
+        common = {item.lower() for item in SEARCH_OBJECTS}
+        filtered = [obj for obj in parsed if obj["name_lower"] in common]
+        if not filtered:
+            return "I don't see common items."
+
+        parts = []
+        for obj in filtered[:5]:
+            pos = self._position_label(obj["rect"], width)
+            if pos:
+                parts.append(f"{obj['name']} ({pos})")
+            else:
+                parts.append(obj["name"])
+        return f"I can see: {', '.join(parts)}."
+
+    def analyze_image(self, image_bytes, mode='describe', query=None, progress_callback=None, return_status=False):
+        """
+        Analyze an image using Azure OpenAI (describe) or Azure Computer Vision (OCR/search).
+
         Args:
             image_bytes: Raw image bytes
             mode: One of 'describe', 'ocr', 'search'
             query: Optional query for search mode
             progress_callback: Optional callback function for progress updates
-            
+
         Returns:
             Human-readable analysis result
         """
         if self.quota_exhausted:
-            msg = "Online quota is exhausted. Please update your API key or billing."
+            msg = "Online quota is exhausted. Please update your Azure plan or key."
             return (False, msg) if return_status else msg
 
-        payload = self._build_payload(image_bytes, mode, query)
-        
-        # Try with retry logic
+        processed_bytes, width, _height = self._prepare_image(image_bytes)
+
         for attempt in range(self.retry_attempts + 1):
             try:
                 if progress_callback and attempt > 0:
                     progress_callback(f"Retry attempt {attempt}")
-                
-                response = requests.post(
-                    OPENROUTER_API_URL,
-                    headers=self.headers,
-                    json=payload,
-                    timeout=REQUEST_TIMEOUT
-                )
-                
-                # Handle rate limiting
-                if response.status_code == 429:
-                    print(f"Rate limited. Waiting {self.retry_delay * 2}s...")
-                    time.sleep(self.retry_delay * 2)
-                    continue
 
-                # Handle quota/billing errors
-                if response.status_code in (401, 402, 403):
-                    try:
-                        err_json = response.json()
-                        err_msg = err_json.get("error", {}).get("message", "")
-                    except Exception:
-                        err_msg = response.text or ""
-
-                    lower_msg = err_msg.lower()
-                    if any(k in lower_msg for k in ["quota", "credit", "billing", "insufficient", "payment required"]):
-                        self.quota_exhausted = True
-                        msg = "Online quota is exhausted. Please update your API key or billing."
+                if mode == 'describe':
+                    # Use Azure OpenAI for scene description
+                    if not self.openai_available:
+                        msg = "Azure OpenAI is not configured for scene description."
                         return (False, msg) if return_status else msg
-                    # If auth error but not quota, still surface a clear message
-                    msg = "Online API authorization failed. Please check your API key."
-                    return (False, msg) if return_status else msg
-                
-                response.raise_for_status()
-                result = response.json()
-                
-                # Parse OpenRouter Response
-                generated_text = None
-                
-                # OpenRouter format: {"choices": [{"message": {"content": "..."}}]}
-                if isinstance(result, dict) and "choices" in result:
-                    if len(result["choices"]) > 0 and "message" in result["choices"][0]:
-                        generated_text = result["choices"][0]["message"].get("content", "")
-                # Error message format
-                elif isinstance(result, dict) and "error" in result:
-                    error_msg = result.get("error", {}).get("message", "Unknown error")
-                    print(f"API error response: {error_msg}")
-                    lower_msg = error_msg.lower()
-                    if any(k in lower_msg for k in ["quota", "credit", "billing", "insufficient", "payment required"]):
-                        self.quota_exhausted = True
-                        msg = "Online quota is exhausted. Please update your API key or billing."
-                        return (False, msg) if return_status else msg
-                    if "loading" in error_msg.lower() or "warming up" in error_msg.lower():
-                        print("Model is loading, will retry...")
-                        time.sleep(self.retry_delay * 3)
-                        continue
-                    raise RuntimeError(f"API error: {error_msg}")
-                else:
-                    print(f"Unexpected response format: {result}")
-                    if attempt < self.retry_attempts:
-                        time.sleep(self.retry_delay)
-                        continue
-                    return "I'm sorry, I couldn't understand the response from the analysis service."
-                
-                # Clean up and format the response
-                formatted = self._format_response(generated_text, mode, query)
-                self.last_successful_response = formatted  # Cache for fallback
-                if return_status:
-                    return True, formatted
-                return formatted
                     
-            except requests.exceptions.Timeout:
-                print(f"Request timed out (attempt {attempt + 1}/{self.retry_attempts + 1})")
-                if attempt < self.retry_attempts:
-                    time.sleep(self.retry_delay)
-                    continue
-                # Return cached response if available
-                if self.last_successful_response:
-                    msg = "The analysis is taking too long. Here's what I saw last time: " + self.last_successful_response
-                    return (False, msg) if return_status else msg
-                msg = "The analysis timed out. Please check your internet connection and try again."
-                return (False, msg) if return_status else msg
-                
-            except requests.exceptions.ConnectionError:
-                print(f"Connection error (attempt {attempt + 1}/{self.retry_attempts + 1})")
-                if attempt < self.retry_attempts:
-                    time.sleep(self.retry_delay)
-                    continue
-                msg = "I couldn't connect to the analysis service. Please check your internet connection."
-                return (False, msg) if return_status else msg
-                
-            except Exception as e:
-                print(f"API Error (attempt {attempt + 1}/{self.retry_attempts + 1}): {e}")
-                if attempt < self.retry_attempts:
-                    time.sleep(self.retry_delay)
-                    continue
-                msg = "Sorry, I couldn't analyze the image right now. Please try again."
-                return (False, msg) if return_status else msg
-        
-        msg = "Analysis failed after multiple attempts. Please try again later."
-        return (False, msg) if return_status else msg
-    
-    def _format_response(self, text: str, mode: str, query: str = None) -> str:
-        """
-        Format the AI response for better user experience.
-        
-        Args:
-            text: Raw generated text
-            mode: Analysis mode
-            query: Optional search query
-            
-        Returns:
-            Formatted, user-friendly response
-        """
-        # Clean up the text
-        text = text.strip()
-        
-        # Remove common AI prefixes
-        prefixes_to_remove = [
-            "This image shows",
-            "In this image",
-            "I can see",
-            "The image shows",
-            "Looking at this image",
-            "The image depicts",
-            "This picture shows"
-        ]
-        
-        for prefix in prefixes_to_remove:
-            if text.lower().startswith(prefix.lower()):
-                text = text[len(prefix):].strip()
-                if text.startswith(","):
-                    text = text[1:].strip()
-                break
-        
-        # Mode-specific formatting
-        if mode == 'describe':
-            if not text or len(text) < 10:
-                return "I'm looking at the image, but I can't make out clear details."
-            return text
-            
-        elif mode == 'ocr':
-            if not text or text.strip().lower() in ['no text detected', 'no text', 'no readable text']:
-                return "I don't see any readable text in this image."
-            return f"I can read: {text}"
-            
-        elif mode == 'search':
-            if query:
-                # Check if the response indicates the query was found
-                positive_indicators = ['yes', 'i can see', 'there is', 'i see', 'found', 'visible']
-                negative_indicators = ['no', "i don't see", 'not visible', 'cannot see', "isn't", 'not present']
-                
-                text_lower = text.lower()
-                
-                # Check for positive match
-                has_positive = any(ind in text_lower for ind in positive_indicators)
-                has_negative = any(ind in text_lower for ind in negative_indicators)
-                
-                if has_positive and not has_negative:
-                    return f"Yes, I can see {query}."
-                elif has_negative:
-                    return f"No, I don't see {query} here."
+                    formatted = self._describe_with_openai(processed_bytes)
+                    formatted = self._shorten(formatted, 300)
+
+                elif mode == 'ocr':
+                    # Use Azure Computer Vision for OCR
+                    if not self.vision_available:
+                        msg = "Azure Computer Vision is not configured for text reading."
+                        return (False, msg) if return_status else msg
+                    
+                    raw = self._read_text(processed_bytes)
+                    formatted = self._format_ocr(raw)
+
+                elif mode == 'search':
+                    # Use Azure Computer Vision for object search
+                    if not self.vision_available:
+                        msg = "Azure Computer Vision is not configured for object search."
+                        return (False, msg) if return_status else msg
+                    
+                    raw = self._analyze_objects(processed_bytes)
+                    formatted = self._format_search(raw, width, _height, query=query)
+
                 else:
-                    return f"Looking for {query}. {text}"
-            else:
-                # General object listing
-                if not text or len(text) < 5:
-                    return "I'm looking around, but I can't identify specific objects clearly."
-                return f"I can see: {text}"
-        
-        return text
-    
-    def quick_search(self, image_bytes: bytes, query: str, progress_callback=None) -> str:
-        """
-        Quick search for a specific object in the image.
-        
-        Args:
-            image_bytes: Raw image bytes
-            query: Object to search for
-            progress_callback: Optional callback for progress updates
-            
-        Returns:
-            Simple yes/no response with context
-        """
-        return self.analyze_image(image_bytes, mode='search', query=query, progress_callback=progress_callback)
+                    formatted = "Unsupported mode."
+
+                self.last_successful_response = formatted
+                return (True, formatted) if return_status else formatted
+
+            except AzureAPIError as e:
+                if e.quota:
+                    self.quota_exhausted = True
+                if e.retryable and attempt < self.retry_attempts:
+                    time.sleep(self.retry_delay)
+                    continue
+                msg = str(e)
+                return (False, msg) if return_status else msg
+
+            except requests.exceptions.Timeout:
+                if attempt < self.retry_attempts:
+                    time.sleep(self.retry_delay)
+                    continue
+                msg = "The online analysis timed out. Please try again."
+                return (False, msg) if return_status else msg
+
+            except requests.exceptions.ConnectionError:
+                if attempt < self.retry_attempts:
+                    time.sleep(self.retry_delay)
+                    continue
+                msg = "I couldn't connect to the online analysis service."
+                return (False, msg) if return_status else msg
+
+            except Exception:
+                if attempt < self.retry_attempts:
+                    time.sleep(self.retry_delay)
+                    continue
+                msg = "Sorry, I couldn't analyze the image right now."
+                return (False, msg) if return_status else msg
+
+        msg = "Analysis failed after multiple attempts."
+        return (False, msg) if return_status else msg
+
+    def quick_search(self, image_bytes, query, progress_callback=None):
+        """Quick search for a specific object in the image."""
+        return self.analyze_image(
+            image_bytes,
+            mode='search',
+            query=query,
+            progress_callback=progress_callback
+        )
+
+
+# Backwards-compatible alias used by main.py
+AIHandler = AzureAIHandler

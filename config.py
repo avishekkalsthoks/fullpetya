@@ -7,13 +7,14 @@ load_dotenv()
 # API Configuration (Online AI)
 # ===============================================
 
-OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY', '').strip()
-OPENROUTER_MODEL = os.getenv('OPENROUTER_MODEL', 'allenai/molmo-2-8b:free')
-OPENROUTER_API_URL = os.getenv('OPENROUTER_API_URL', 'https://openrouter.ai/api/v1/chat/completions')
+AZURE_VISION_ENDPOINT = os.getenv('AZURE_VISION_ENDPOINT', '').strip()
+AZURE_VISION_KEY = os.getenv('AZURE_VISION_KEY', '').strip()
 
-# Optional: Site URL and name for rankings on openrouter.ai
-OPENROUTER_SITE_URL = os.getenv('OPENROUTER_SITE_URL', '').strip()
-OPENROUTER_SITE_NAME = os.getenv('OPENROUTER_SITE_NAME', 'Smart Vision Guide').strip()
+# Azure OpenAI Configuration (for scene description)
+AZURE_OPENAI_ENDPOINT = os.getenv('AZURE_OPENAI_ENDPOINT', '').strip()
+AZURE_OPENAI_KEY = os.getenv('AZURE_OPENAI_KEY', '').strip()
+AZURE_OPENAI_DEPLOYMENT = os.getenv('AZURE_OPENAI_DEPLOYMENT', 'gpt-4o').strip()
+AZURE_OPENAI_API_VERSION = os.getenv('AZURE_OPENAI_API_VERSION', '2024-02-15-preview').strip()
 
 # ===============================================
 # Local / Offline Vision Configuration
@@ -75,6 +76,28 @@ ANALYSIS_TIMEOUT = int(os.getenv('ANALYSIS_TIMEOUT', '60'))
 
 BUTTON_MODE_PIN = int(os.getenv('BUTTON_MODE_PIN', '17'))
 BUTTON_SELECT_PIN = int(os.getenv('BUTTON_SELECT_PIN', '27'))
+
+# ===============================================
+# Ultrasonic Sensor + Buzzer Configuration
+# ===============================================
+
+# HC-SR04 Ultrasonic Sensor pins
+ULTRASONIC_TRIGGER_PIN = int(os.getenv('ULTRASONIC_TRIGGER_PIN', '23'))
+ULTRASONIC_ECHO_PIN = int(os.getenv('ULTRASONIC_ECHO_PIN', '24'))
+
+# Buzzer pin
+BUZZER_PIN = int(os.getenv('BUZZER_PIN', '25'))
+
+# Enable/disable ultrasonic obstacle detection
+ENABLE_ULTRASONIC = os.getenv('ENABLE_ULTRASONIC', 'true').lower() == 'true'
+
+# Distance thresholds in centimeters
+ULTRASONIC_ALERT_DISTANCE = float(os.getenv('ULTRASONIC_ALERT_DISTANCE', '50'))  # Start warning at 50cm
+ULTRASONIC_DANGER_DISTANCE = float(os.getenv('ULTRASONIC_DANGER_DISTANCE', '20'))  # Danger zone at 20cm
+
+# Buzzer settings
+BUZZER_FREQUENCY = int(os.getenv('BUZZER_FREQUENCY', '2000'))  # Hz (for PWM buzzer)
+ULTRASONIC_CHECK_INTERVAL = float(os.getenv('ULTRASONIC_CHECK_INTERVAL', '0.2'))  # Check every 200ms
 
 # ===============================================
 # Camera Settings (optimized for Pi Camera)
@@ -148,8 +171,8 @@ ENABLE_SEARCH_MODE = os.getenv('ENABLE_SEARCH_MODE', 'true').lower() == 'true'
 def get_system_info():
     """Get system information for debugging."""
     return {
-        'openrouter_configured': bool(OPENROUTER_API_KEY),
-        'openrouter_model': OPENROUTER_MODEL,
+        'azure_vision_configured': bool(AZURE_VISION_ENDPOINT and AZURE_VISION_KEY),
+        'azure_openai_configured': bool(AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_KEY),
         'local_vision_only': LOCAL_VISION_ONLY,
         'local_model_dir': LOCAL_MODEL_DIR,
         'tts_backend': TTS_BACKEND,
@@ -163,8 +186,8 @@ if __name__ == '__main__':
     print("=" * 50)
     info = get_system_info()
     print(f"\n🔧 API Configuration:")
-    print(f"  OpenRouter: {'✓ Configured' if info['openrouter_configured'] else '✗ Not configured'}")
-    print(f"  Model:      {info['openrouter_model']}")
+    print(f"  Azure OpenAI (Describe): {'✓ Configured' if info['azure_openai_configured'] else '✗ Not configured'}")
+    print(f"  Azure Vision (OCR/Search): {'✓ Configured' if info['azure_vision_configured'] else '✗ Not configured'}")
     print(f"\n🧠 Local Vision:")
     print(f"  Offline Only: {info['local_vision_only']}")
     print(f"  Model Dir:    {info['local_model_dir']}")
@@ -188,3 +211,4 @@ if __name__ == '__main__':
     print(f"  Search:       {'✓' if ENABLE_SEARCH_MODE else '✗'}")
     print("\n" + "=" * 50)
     print(f"  JPEG Quality: {IMAGE_JPEG_QUALITY}%")
+

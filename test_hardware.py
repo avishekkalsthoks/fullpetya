@@ -281,23 +281,23 @@ def test_face_recognition():
         return False
 
 
-def test_openrouter():
-    """Test OpenRouter API connection."""
-    print("\n=== Testing OpenRouter API ===")
+def test_azure_vision():
+    """Test Azure Vision API connection."""
+    print("\n=== Testing Azure Vision API ===")
     
     try:
-        from handlers.ai_handler import AIHandler
-        ai = AIHandler()
+        from handlers.ai_handler import AzureAIHandler
+        ai = AzureAIHandler()
         
-        print(f"✓ OpenRouter API configured")
+        print(f"✓ Azure Vision API configured")
         
         return True
         
     except RuntimeError as e:
-        print(f"⚠️  OpenRouter API not configured: {e}")
+        print(f"⚠️  Azure Vision API not configured: {e}")
         return False
     except Exception as e:
-        print(f"✗ OpenRouter API test failed: {e}")
+        print(f"✗ Azure Vision API test failed: {e}")
         return False
 
 
@@ -355,7 +355,7 @@ def main():
     results['Audio'] = test_audio()
     results['Local Face Recognition'] = test_face_recognition()
     results['Local Vision (Offline)'] = test_local_vision()
-    results['OpenRouter API'] = test_openrouter()
+    results['Azure Vision API'] = test_azure_vision()
     
     # Print summary
     print("\n" + "=" * 60)

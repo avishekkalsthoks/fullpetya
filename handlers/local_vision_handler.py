@@ -145,12 +145,12 @@ class LocalVisionHandler:
         ratio = area / frame_area
 
         if ratio > 0.25:
-            return "very close, within one step"
+            return "very close, about 1 arm length (2-3 feet)"
         if ratio > 0.12:
-            return "close, about one to two steps away"
+            return "close, about 2 arm lengths (4-6 feet)"
         if ratio > 0.06:
-            return "a few steps away"
-        return "farther away"
+            return "a bit farther, about 3-4 arm lengths (7-10 feet)"
+        return "farther, 5+ arm lengths (10+ feet)"
 
     def detect_objects(self, image_bytes: bytes, top_k: int = 6) -> List[Dict]:
         """Run object detection and return top detections."""
