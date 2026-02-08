@@ -339,19 +339,37 @@ class AzureAIHandler:
             "Content-Type": "application/json"
         }
 
-        # Use the global system prompt
-        prompt = SCENE_DESCRIPTION_PROMPT
+        # System prompt for the AI - must give ONLY the final answer
+        system_prompt = """You are an assistant for blind people. Look at the image and give a SHORT description for navigation.
 
-        # OpenRouter API payload format with vision model
+RESPOND ONLY WITH THE FINAL DESCRIPTION. Do NOT explain your thinking. Do NOT include any reasoning.
+
+Format your response EXACTLY like this example:
+"You are in a living room. There is a table about 1 meter ahead. A chair is to your left, about 2 meters away."
+
+Rules:
+- Start with "You are in a..." or "You are on a..."
+- Mention obstacles with direction (ahead, left, right) and distance
+- Maximum 2-3 short sentences
+- Focus only on navigation and safety"""
+
+        # User prompt with the image
+        user_prompt = "Describe this scene for a blind person. Give ONLY the final description, no thinking or reasoning."
+
+        # OpenRouter API payload - using system + user messages
         payload = {
             "model": self.openrouter_model,
             "messages": [
+                {
+                    "role": "system",
+                    "content": system_prompt
+                },
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": prompt
+                            "text": user_prompt
                         },
                         {
                             "type": "image_url",
@@ -362,8 +380,9 @@ class AzureAIHandler:
                     ]
                 }
             ],
-            "max_tokens": 300,
-            "temperature": 0.4
+            "max_tokens": 150,  # Shorter to force concise response
+            "temperature": 0.3,  # Lower for more consistent output
+            "reasoning": {"enabled": False}  # Explicitly disable reasoning mode
         }
 
         timeout = timeout_seconds or self.request_timeout
