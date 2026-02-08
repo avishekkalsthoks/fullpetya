@@ -248,7 +248,6 @@ class AzureAIHandler:
     def _prepare_image(self, image_bytes):
         """
         Resize and compress image to reduce payload size for Pi Zero 2W.
-        Also rotates image 180° if camera is mounted upside down.
         Returns (jpeg_bytes, width, height) for the processed image.
         """
         try:
@@ -256,16 +255,15 @@ class AzureAIHandler:
             width, height = img.size
             fmt = (img.format or "").upper()
 
-            # Rotate 180 degrees (camera is mounted upside down)
-            img = img.rotate(180)
-
             needs_resize = ENABLE_PREPROCESSING and IMAGE_MAX_WIDTH > 0 and width > IMAGE_MAX_WIDTH
             needs_convert = img.mode != "RGB"
             needs_jpeg = fmt != "JPEG"
 
             should_reencode = needs_resize or needs_convert or needs_jpeg or ENABLE_PREPROCESSING
 
-            # Always re-encode since we rotated
+            if not should_reencode:
+                return image_bytes, width, height
+
             if needs_resize:
                 ratio = IMAGE_MAX_WIDTH / float(width)
                 new_height = int(float(height) * ratio)

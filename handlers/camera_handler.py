@@ -106,6 +106,9 @@ class CameraHandler:
         if frame is None or successful_reads < 3:
             raise RuntimeError(f'Failed to capture image from camera (only {successful_reads}/{self.warmup_frames} successful reads)')
 
+        # Rotate 180 degrees (camera is mounted upside down)
+        frame = cv2.rotate(frame, cv2.ROTATE_180)
+
         # Encode as JPEG bytes
         encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
         ret, buf = cv2.imencode('.jpg', frame, encode_param)
