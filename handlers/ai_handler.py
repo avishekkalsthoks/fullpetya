@@ -349,8 +349,8 @@ class AzureAIHandler:
                 ]
             }],
             "generationConfig": {
-                "maxOutputTokens": 150,
-                "temperature": 0.2
+                "maxOutputTokens": 300,
+                "temperature": 0.4
             }
         }
 
