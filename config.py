@@ -47,6 +47,10 @@ OCR_TIMEOUT = int(os.getenv('OCR_TIMEOUT', '8'))
 # Face Recognition Configuration (Cloud Only)
 # ===============================================
 
+# Local face database directory (for enrollment)
+FACE_DB_DIR = os.getenv('FACE_DB_DIR', 'faces')
+FACE_CONFIDENCE_THRESHOLD = int(os.getenv('FACE_CONFIDENCE_THRESHOLD', '80'))
+
 # Cloud Face Recognition API
 # Set this to your cloud API endpoint (e.g., GitHub Codespaces URL)
 # Face processing happens in the cloud - lightweight for Pi Zero 2W
