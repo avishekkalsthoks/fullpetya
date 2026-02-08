@@ -275,6 +275,13 @@ class SmartVision:
         if self._is_debounced(channel):
             return
         
+        # Robustness: Wait 20ms and verify the button is still physically pressed
+        # This helps ignore electrical noise spikes from buzzer/sensor/Pi
+        time.sleep(0.02)
+        if GPIO_AVAILABLE and GPIO.input(channel) != GPIO.LOW:
+            print(f"Noise detected on GPIO {channel} - ignoring")
+            return
+
         if self.analysis_in_progress:
             self.audio.say("Please wait, I'm busy.")
             return
@@ -304,6 +311,12 @@ class SmartVision:
         if self._is_debounced(channel):
             return
         
+        # Robustness: Wait 20ms and verify the button is still physically pressed
+        time.sleep(0.02)
+        if GPIO_AVAILABLE and GPIO.input(channel) != GPIO.LOW:
+            print(f"Noise detected on GPIO {channel} - ignoring")
+            return
+
         if self.analysis_in_progress:
             self.audio.say("Please wait, I'm still processing.")
             return

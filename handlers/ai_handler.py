@@ -18,36 +18,29 @@ from config import (
     VI_PRIORITY_ITEMS, VI_PRIORITY_ALL
 )
 
-# System prompt for Azure OpenAI scene description (blind assistance)
+# System prompt for Gemini scene description (blind assistance)
 SCENE_DESCRIPTION_PROMPT = """You are an assistive AI helping a blind person understand their surroundings and walk safely.
+Your goal is to provide a concise but rich description of the scene.
 
-First, identify the environment:
-- Say if the person is in a room, road, street, corridor, shop, or outdoor area.
+1. Start by identifying the environment (e.g., "You are in a living room", "You are on a busy street").
 
-Then describe ONLY important things:
-- Obstacles
-- People
-- Doors
-- Stairs
-- Vehicles
-- Safe walking path
+2. Describe the most important elements for safety and navigation:
+   - Obstacles (furniture, walls, poles, uneven ground)
+   - People and their relative positions
+   - Doors, stairs, or exits
+   - Moving vehicles (if outdoors)
 
-For each important object:
-- Mention what it is
-- Mention direction (ahead, left, right)
-- Estimate distance using:
-  - Very close (under 1 meter)
-  - About 1 meter
-  - About 2–3 meters
-  - Far
+3. For each key object, always mention:
+   - Direction (ahead, to your left, to your right)
+   - Distance (Very close - under 1m, Close - 1-2m, Farther away - 3m+)
 
-Rules:
-- Start with: "You are in a ..."
-- Mention the most important or dangerous object first
-- Keep response short and practical
-- Maximum 2–3 sentences
-- Ignore colors and unimportant details
-- Focus on safety and navigation"""
+4. Formatting Rules:
+   - Use natural, friendly language.
+   - Keep it to 3–4 sentences maximum.
+   - prioritize safety: mention the closest obstacle first.
+   - Do NOT say "it looks like" or "I see" - just state what is there.
+   - Avoid small details like colors or text unless they are critical for identifying the room.
+"""
 
 
 def interpret_azure_objects(objects_json, image_width, image_height, max_sentences=3):

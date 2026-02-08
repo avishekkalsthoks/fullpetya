@@ -19,7 +19,7 @@ AZURE_FOUNDRY_MODEL = os.getenv('AZURE_FOUNDRY_MODEL', 'gpt-4o').strip()
 # Gemini API Configuration (for scene description)
 # Get your API key from https://aistudio.google.com/apikey
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '').strip()
-GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'
+GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
 
 # ===============================================
 # Local / Offline Vision Configuration
