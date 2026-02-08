@@ -16,6 +16,11 @@ AZURE_FOUNDRY_ENDPOINT = os.getenv('AZURE_FOUNDRY_ENDPOINT', '').strip()
 AZURE_FOUNDRY_KEY = os.getenv('AZURE_FOUNDRY_KEY', '').strip()
 AZURE_FOUNDRY_MODEL = os.getenv('AZURE_FOUNDRY_MODEL', 'gpt-4o').strip()
 
+# Gemini API Configuration (for scene description)
+# Get your API key from https://aistudio.google.com/apikey
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '').strip()
+GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'
+
 # ===============================================
 # Local / Offline Vision Configuration
 # ===============================================
@@ -201,6 +206,7 @@ def get_system_info():
     return {
         'azure_vision_configured': bool(AZURE_VISION_ENDPOINT and AZURE_VISION_KEY),
         'azure_foundry_configured': bool(AZURE_FOUNDRY_ENDPOINT and AZURE_FOUNDRY_KEY),
+        'gemini_configured': bool(GEMINI_API_KEY),
         'gps_configured': bool(PHYPHOX_URL and ENABLE_GPS_MODES),
         'local_vision_only': LOCAL_VISION_ONLY,
         'local_model_dir': LOCAL_MODEL_DIR,
@@ -215,7 +221,7 @@ if __name__ == '__main__':
     print("=" * 50)
     info = get_system_info()
     print(f"\n🔧 API Configuration:")
-    print(f"  Azure AI Foundry (Describe): {'✓ Configured' if info['azure_foundry_configured'] else '✗ Not configured'}")
+    print(f"  Gemini (Describe):       {'✓ Configured' if info['gemini_configured'] else '✗ Not configured'}")
     print(f"  Azure Vision (OCR/Search): {'✓ Configured' if info['azure_vision_configured'] else '✗ Not configured'}")
     print(f"\n🧠 Local Vision:")
     print(f"  Offline Only: {info['local_vision_only']}")

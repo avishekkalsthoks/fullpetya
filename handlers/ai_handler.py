@@ -1,6 +1,6 @@
 """
 AI Handler for Smart Vision Guide.
-Uses Azure AI Foundry (GPT-4 Vision) for scene description and Azure Computer Vision for OCR/Search.
+Uses Gemini AI for scene description and Azure Computer Vision for OCR/Search.
 Optimized for Raspberry Pi Zero 2W with retry logic, reduced payload, and fast fallbacks.
 """
 
@@ -12,7 +12,7 @@ import requests
 from PIL import Image
 from config import (
     AZURE_VISION_ENDPOINT, AZURE_VISION_KEY,
-    AZURE_FOUNDRY_ENDPOINT, AZURE_FOUNDRY_KEY, AZURE_FOUNDRY_MODEL,
+    GEMINI_API_KEY, GEMINI_API_URL,
     REQUEST_TIMEOUT, IMAGE_MAX_WIDTH, IMAGE_JPEG_QUALITY, SEARCH_OBJECTS,
     ENABLE_PREPROCESSING, RETRY_ATTEMPTS, RETRY_DELAY
 )
@@ -44,7 +44,7 @@ Rules:
 - Start with: "You are in a ..."
 - Mention the most important or dangerous object first
 - Keep response short and practical
-- Maximum 3–4 sentences
+- Maximum 2–3 sentences
 - Ignore colors and unimportant details
 - Focus on safety and navigation"""
 
@@ -193,15 +193,14 @@ class AzureAIHandler:
     READ_PATH = "/vision/v3.2/read/analyze"
 
     def __init__(self, retry_attempts=RETRY_ATTEMPTS, retry_delay=RETRY_DELAY):
-        # Check Azure AI Foundry configuration for describe mode
-        self.foundry_available = bool(AZURE_FOUNDRY_ENDPOINT and AZURE_FOUNDRY_KEY)
-        if self.foundry_available:
-            self.foundry_endpoint = AZURE_FOUNDRY_ENDPOINT.rstrip("/")
-            self.foundry_key = AZURE_FOUNDRY_KEY
-            self.foundry_model = AZURE_FOUNDRY_MODEL
-            print("OK: Azure AI Foundry configured for scene description")
+        # Check Gemini configuration for describe mode
+        self.gemini_available = bool(GEMINI_API_KEY)
+        if self.gemini_available:
+            self.gemini_key = GEMINI_API_KEY
+            self.gemini_url = GEMINI_API_URL
+            print(f"OK: Gemini configured for scene description (Model: gemini-2.5-flash)")
         else:
-            print("WARN: Azure AI Foundry not configured. Describe mode will use fallback.")
+            print("WARN: Gemini not configured. Describe mode will use fallback.")
 
         # Check Azure Vision configuration for OCR/search
         self.vision_available = bool(AZURE_VISION_ENDPOINT and AZURE_VISION_KEY)
@@ -218,8 +217,8 @@ class AzureAIHandler:
         else:
             print("WARN: Azure Computer Vision not configured. OCR/search will use offline fallback.")
 
-        if not self.foundry_available and not self.vision_available:
-            raise RuntimeError("Neither Azure AI Foundry nor Azure Computer Vision is configured. Please set environment variables.")
+        if not self.gemini_available and not self.vision_available:
+            raise RuntimeError("Neither Gemini nor Azure Computer Vision is configured. Please set environment variables.")
 
         self.retry_attempts = retry_attempts
         self.retry_delay = retry_delay
@@ -300,7 +299,7 @@ class AzureAIHandler:
         msg_lower = (msg or "").lower()
 
         if status in (401, 403):
-            service = "Azure AI Foundry" if is_openai else "Azure Vision"
+            service = "Gemini" if is_openai else "Azure Vision"
             raise AzureAPIError(
                 f"{service} authorization failed. Please check your API key.",
                 retryable=False,
@@ -324,52 +323,45 @@ class AzureAIHandler:
 
         raise AzureAPIError("Online request failed.", retryable=False)
 
-    def _describe_with_foundry(self, image_bytes, timeout_seconds=None):
-        """Use Azure AI Foundry to describe the scene for blind assistance."""
-        if not self.foundry_available:
-            raise AzureAPIError("Azure AI Foundry not configured.", retryable=False)
+    def _describe_with_gemini(self, image_bytes, timeout_seconds=None):
+        """Use Gemini AI to describe the scene."""
+        if not self.gemini_available:
+            raise AzureAPIError("Gemini not configured.", retryable=False)
 
         # Encode image to base64
         base64_image = base64.b64encode(image_bytes).decode('utf-8')
 
-        # Build the API URL for Azure AI Foundry
-        # Format: https://<resource>.services.ai.azure.com/models/chat/completions
-        url = f"{self.foundry_endpoint}/models/chat/completions"
+        # Build the Gemini API URL with key
+        url = f"{self.gemini_url}?key={self.gemini_key}"
 
         headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.foundry_key}"
+            "Content-Type": "application/json"
         }
 
+        # Use the global system prompt
+        prompt = SCENE_DESCRIPTION_PROMPT
+
+        # Gemini API payload format
         payload = {
-            "model": self.foundry_model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": SCENE_DESCRIPTION_PROMPT
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "Describe what you see in this image to help me navigate safely."
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}",
-                                "detail": "low"  # Use low detail for faster response
-                            }
+            "contents": [{
+                "parts": [
+                    {"text": prompt},
+                    {
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": base64_image
                         }
-                    ]
-                }
-            ],
-            "max_tokens": 150,  # Keep response short
-            "temperature": 0.3  # More focused responses
+                    }
+                ]
+            }],
+            "generationConfig": {
+                "maxOutputTokens": 150,
+                "temperature": 0.2
+            }
         }
 
         timeout = timeout_seconds or self.request_timeout
+
         response = self.session.post(
             url,
             headers=headers,
@@ -379,19 +371,22 @@ class AzureAIHandler:
         self._raise_for_status(response, is_openai=True)
 
         result = response.json()
-        
-        # Extract the response message
-        choices = result.get("choices", [])
-        if not choices:
+
+        # Extract the response from Gemini format
+        candidates = result.get("candidates", [])
+        if not candidates:
             return "I couldn't analyze the scene. Please try again."
-        
-        message = choices[0].get("message", {})
-        content = message.get("content", "").strip()
-        
-        if not content:
+
+        content = candidates[0].get("content", {})
+        parts = content.get("parts", [])
+        if not parts:
             return "I couldn't understand what I'm seeing. Please try again."
-        
-        return content
+
+        text = parts[0].get("text", "").strip()
+        if not text:
+            return "I couldn't understand what I'm seeing. Please try again."
+
+        return text
 
     def _analyze_objects(self, image_bytes, timeout_seconds=None):
         """Use Azure Computer Vision to detect objects."""
@@ -506,13 +501,31 @@ class AzureAIHandler:
             for line in page.get("lines", []):
                 value = (line.get("text") or "").strip()
                 if value:
-                    lines.append(value)
+                    # Clean up text for better TTS reading
+                    # Remove or replace characters that sound awkward when spoken
+                    cleaned = value
+                    cleaned = cleaned.replace("/", " ")  # slash -> space
+                    cleaned = cleaned.replace("\\", " ")  # backslash -> space
+                    cleaned = cleaned.replace("|", " ")  # pipe -> space
+                    cleaned = cleaned.replace("_", " ")  # underscore -> space
+                    cleaned = cleaned.replace("@", " at ")  # @ -> at
+                    cleaned = cleaned.replace("&", " and ")  # & -> and
+                    cleaned = cleaned.replace("#", " number ")  # # -> number
+                    cleaned = cleaned.replace("$", " dollars ")  # $ -> dollars
+                    cleaned = cleaned.replace("%", " percent ")  # % -> percent
+                    cleaned = " ".join(cleaned.split())  # normalize whitespace
+                    if cleaned:
+                        lines.append(cleaned)
 
         if not lines:
             return "I don't see any readable text in this image."
 
-        joined = " / ".join(lines)
-        joined = self._shorten(joined, 200)
+        # Join lines with periods for natural speech pauses
+        joined = ". ".join(lines)
+        # Ensure it ends with a period
+        if not joined.endswith("."):
+            joined += "."
+        joined = self._shorten(joined, 250)
         return f"I can read: {joined}"
 
     def _format_search(self, objects, width, height=None, query=None):
@@ -577,12 +590,12 @@ class AzureAIHandler:
                     progress_callback(f"Retry attempt {attempt}")
 
                 if mode == 'describe':
-                    # Use Azure AI Foundry for scene description
-                    if not self.foundry_available:
-                        msg = "Azure AI Foundry is not configured for scene description."
+                    # Use Gemini for scene description
+                    if not self.gemini_available:
+                        msg = "Gemini is not configured for scene description."
                         return (False, msg) if return_status else msg
                     
-                    formatted = self._describe_with_foundry(processed_bytes)
+                    formatted = self._describe_with_gemini(processed_bytes)
                     formatted = self._shorten(formatted, 300)
 
                 elif mode == 'ocr':
