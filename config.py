@@ -50,6 +50,11 @@ OCR_TIMEOUT = int(os.getenv('OCR_TIMEOUT', '8'))
 FACE_DB_DIR = os.getenv('FACE_DB_DIR', 'faces')
 FACE_CONFIDENCE_THRESHOLD = int(os.getenv('FACE_CONFIDENCE_THRESHOLD', '80'))
 
+# Cloud Face Recognition API (for online mode - better accuracy)
+# Set this to your cloud API endpoint (e.g., GitHub Codespaces URL)
+FACE_API_URL = os.getenv('FACE_API_URL', '').strip()
+FACE_API_TIMEOUT = int(os.getenv('FACE_API_TIMEOUT', '15'))
+
 # Face detector (DNN preferred)
 FACE_DNN_PROTO = os.getenv(
     'FACE_DNN_PROTO',

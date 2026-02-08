@@ -15,11 +15,11 @@ An assistive vision device optimized for Raspberry Pi Zero 2W (512MB RAM) with *
 
 ## Modes (Online + Offline)
 
-| Mode | Online (Azure Vision) | Offline Fallback |
-|------|----------------------|------------------|
+| Mode | Online | Offline Fallback |
+|------|--------|------------------|
 | Describe | Full scene description (Gemini AI) | Object summary + positions + distance hints |
-| OCR | Vision OCR | Tesseract OCR |
-| Face | Local LBPH | Local LBPH (always offline) |
+| OCR | Azure Vision OCR | Tesseract OCR |
+| Face | Cloud API (deep learning) | Local LBPH recognition |
 | Search | AI object search | MobileNet-SSD object detection |
 
 Set `LOCAL_VISION_ONLY=true` in `.env` to **force offline-only** mode.
@@ -209,8 +209,33 @@ The systemd service can run this automatically on boot.
 
 ---
 
-## Face Enrollment
+## Face Recognition (Online + Offline)
 
+Face recognition now supports **two modes**:
+
+### Online Mode (Cloud API - Better Accuracy)
+
+Uses deep learning models hosted on GitHub Codespaces for superior recognition accuracy.
+
+**Setup:**
+1. Create a GitHub Codespaces with the face recognition API
+2. Make port 5000 **PUBLIC** in the Codespaces settings
+3. Add to your `.env`:
+   ```
+   FACE_API_URL=https://your-codespace-name-5000.app.github.dev
+   ```
+
+**How it works:**
+- Images are sent to the cloud API for processing
+- Deep learning models analyze faces
+- Results include name, confidence, age, and gender estimates
+- Falls back to offline mode if cloud is unavailable
+
+### Offline Mode (Local LBPH)
+
+Uses OpenCV's LBPH algorithm for local recognition without internet.
+
+**Face Enrollment (Offline):**
 ```bash
 source venv/bin/activate
 python3 enroll_face.py "Alice" --photos 5
@@ -221,6 +246,15 @@ Faces are stored in:
 faces/<name>/img1.jpg
 faces/<name>/img2.jpg
 ```
+
+### Best Practices for Accuracy
+
+For best recognition (especially with cloud API):
+- **Capture 5-10 images** per person with different angles
+- **Vary lighting**: bright, normal, dim
+- **Face angles**: front, left profile, right profile
+- **Face should fill 40-60%** of the frame
+- Avoid sunglasses (unless you want to recognize with them)
 
 ---
 
