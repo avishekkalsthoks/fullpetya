@@ -1,6 +1,6 @@
 """
 AI Handler for Smart Vision Guide.
-Uses Gemini AI for scene description and Azure Computer Vision for OCR/Search.
+Uses OpenRouter API (nvidia/nemotron-nano-12b-v2-vl:free) for scene description and Azure Computer Vision for OCR/Search.
 Optimized for Raspberry Pi Zero 2W with retry logic, reduced payload, and fast fallbacks.
 """
 
@@ -12,13 +12,13 @@ import requests
 from PIL import Image
 from config import (
     AZURE_VISION_ENDPOINT, AZURE_VISION_KEY,
-    GEMINI_API_KEY, GEMINI_API_URL,
+    OPENROUTER_API_KEY, OPENROUTER_MODEL, OPENROUTER_API_URL,
     REQUEST_TIMEOUT, IMAGE_MAX_WIDTH, IMAGE_JPEG_QUALITY, SEARCH_OBJECTS,
     ENABLE_PREPROCESSING, RETRY_ATTEMPTS, RETRY_DELAY,
     VI_PRIORITY_ITEMS, VI_PRIORITY_ALL
 )
 
-# System prompt for Gemini scene description (blind assistance)
+# System prompt for OpenRouter scene description (blind assistance)
 SCENE_DESCRIPTION_PROMPT = """You are an assistive AI helping a blind person understand their surroundings and walk safely.
 Your goal is to provide a concise but rich description of the scene.
 
@@ -36,8 +36,8 @@ Your goal is to provide a concise but rich description of the scene.
 
 4. Formatting Rules:
    - Use natural, friendly language.
-   - Keep it to 3–4 sentences maximum.
-   - prioritize safety: mention the closest obstacle first.
+   - Keep it to 3-4 sentences maximum.
+   - Prioritize safety: mention the closest obstacle first.
    - Do NOT say "it looks like" or "I see" - just state what is there.
    - Avoid small details like colors or text unless they are critical for identifying the room.
 """
@@ -187,14 +187,15 @@ class AzureAIHandler:
     READ_PATH = "/vision/v3.2/read/analyze"
 
     def __init__(self, retry_attempts=RETRY_ATTEMPTS, retry_delay=RETRY_DELAY):
-        # Check Gemini configuration for describe mode
-        self.gemini_available = bool(GEMINI_API_KEY)
-        if self.gemini_available:
-            self.gemini_key = GEMINI_API_KEY
-            self.gemini_url = GEMINI_API_URL
-            print(f"OK: Gemini configured for scene description (Model: gemini-2.5-flash)")
+        # Check OpenRouter configuration for describe mode
+        self.openrouter_available = bool(OPENROUTER_API_KEY)
+        if self.openrouter_available:
+            self.openrouter_key = OPENROUTER_API_KEY
+            self.openrouter_url = OPENROUTER_API_URL
+            self.openrouter_model = OPENROUTER_MODEL
+            print(f"OK: OpenRouter configured for scene description (Model: {OPENROUTER_MODEL})")
         else:
-            print("WARN: Gemini not configured. Describe mode will use fallback.")
+            print("WARN: OpenRouter not configured. Describe mode will use fallback.")
 
         # Check Azure Vision configuration for OCR/search
         self.vision_available = bool(AZURE_VISION_ENDPOINT and AZURE_VISION_KEY)
@@ -211,8 +212,8 @@ class AzureAIHandler:
         else:
             print("WARN: Azure Computer Vision not configured. OCR/search will use offline fallback.")
 
-        if not self.gemini_available and not self.vision_available:
-            raise RuntimeError("Neither Gemini nor Azure Computer Vision is configured. Please set environment variables.")
+        if not self.openrouter_available and not self.vision_available:
+            raise RuntimeError("Neither OpenRouter nor Azure Computer Vision is configured. Please set environment variables.")
 
         self.retry_attempts = retry_attempts
         self.retry_delay = retry_delay
@@ -293,7 +294,7 @@ class AzureAIHandler:
         msg_lower = (msg or "").lower()
 
         if status in (401, 403):
-            service = "Gemini" if is_openai else "Azure Vision"
+            service = "OpenRouter" if is_openai else "Azure Vision"
             raise AzureAPIError(
                 f"{service} authorization failed. Please check your API key.",
                 retryable=False,
@@ -317,76 +318,75 @@ class AzureAIHandler:
 
         raise AzureAPIError("Online request failed.", retryable=False)
 
-    def _describe_with_gemini(self, image_bytes, timeout_seconds=None):
-        """Use Gemini AI to describe the scene."""
-        if not self.gemini_available:
-            raise AzureAPIError("Gemini not configured.", retryable=False)
+    def _describe_with_openrouter(self, image_bytes, timeout_seconds=None):
+        """Use OpenRouter API to describe the scene."""
+        if not self.openrouter_available:
+            raise AzureAPIError("OpenRouter not configured.", retryable=False)
 
         # Encode image to base64
         base64_image = base64.b64encode(image_bytes).decode('utf-8')
 
-        # Build the Gemini API URL with key
-        url = f"{self.gemini_url}?key={self.gemini_key}"
-
         headers = {
+            "Authorization": f"Bearer {self.openrouter_key}",
             "Content-Type": "application/json"
         }
 
         # Use the global system prompt
         prompt = SCENE_DESCRIPTION_PROMPT
 
-        # Gemini API payload format
+        # OpenRouter API payload format with vision model
         payload = {
-            "contents": [{
-                "parts": [
-                    {"text": prompt},
-                    {
-                        "inline_data": {
-                            "mime_type": "image/jpeg",
-                            "data": base64_image
+            "model": self.openrouter_model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": prompt
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
                         }
-                    }
-                ]
-            }],
-            "generationConfig": {
-                "maxOutputTokens": 300,
-                "temperature": 0.4
-            }
+                    ]
+                }
+            ],
+            "max_tokens": 300,
+            "temperature": 0.4
         }
 
         timeout = timeout_seconds or self.request_timeout
 
         response = self.session.post(
-            url,
+            self.openrouter_url,
             headers=headers,
             json=payload,
             timeout=(timeout, timeout)
         )
         
-        print(f"📡 Gemini API status: {response.status_code}")
+        print(f"📡 OpenRouter API status: {response.status_code}")
         
         self._raise_for_status(response, is_openai=True)
 
         result = response.json()
 
-        # Extract the response from Gemini format
-        candidates = result.get("candidates", [])
-        if not candidates:
-            print(f"⚠️  Gemini returned no candidates. Full response: {result}")
-            raise AzureAPIError("Gemini returned no response candidates.", retryable=True)
+        # Extract the response from OpenRouter format
+        choices = result.get("choices", [])
+        if not choices:
+            print(f"⚠️  OpenRouter returned no choices. Full response: {result}")
+            raise AzureAPIError("OpenRouter returned no response choices.", retryable=True)
 
-        content = candidates[0].get("content", {})
-        parts = content.get("parts", [])
-        if not parts:
-            print(f"⚠️  Gemini returned empty parts. Content: {content}")
-            raise AzureAPIError("Gemini returned empty content.", retryable=True)
-
-        text = parts[0].get("text", "").strip()
+        message = choices[0].get("message", {})
+        text = message.get("content", "").strip()
+        
         if not text:
-            print(f"⚠️  Gemini returned empty text. Parts: {parts}")
-            raise AzureAPIError("Gemini returned empty text.", retryable=True)
+            print(f"⚠️  OpenRouter returned empty text. Message: {message}")
+            raise AzureAPIError("OpenRouter returned empty text.", retryable=True)
 
-        # Check if Gemini's response indicates it couldn't process the image
+        # Check if the response indicates it couldn't process the image
         failure_phrases = [
             "i can't process",
             "i cannot process",
@@ -406,10 +406,10 @@ class AzureAIHandler:
         text_lower = text.lower()
         for phrase in failure_phrases:
             if phrase in text_lower:
-                print(f"⚠️  Gemini indicated failure: {text[:100]}")
-                raise AzureAPIError(f"Gemini couldn't process: {text[:50]}", retryable=False)
+                print(f"⚠️  OpenRouter indicated failure: {text[:100]}")
+                raise AzureAPIError(f"OpenRouter couldn't process: {text[:50]}", retryable=False)
 
-        print(f"✓ Gemini response: {text[:100]}...")
+        print(f"✓ OpenRouter response: {text[:100]}...")
         return text
 
     def _analyze_objects(self, image_bytes, timeout_seconds=None):
@@ -696,12 +696,12 @@ class AzureAIHandler:
                     progress_callback(f"Retry attempt {attempt}")
 
                 if mode == 'describe':
-                    # Use Gemini for scene description
-                    if not self.gemini_available:
-                        msg = "Gemini is not configured for scene description."
+                    # Use OpenRouter for scene description
+                    if not self.openrouter_available:
+                        msg = "OpenRouter is not configured for scene description."
                         return (False, msg) if return_status else msg
                     
-                    formatted = self._describe_with_gemini(processed_bytes)
+                    formatted = self._describe_with_openrouter(processed_bytes)
                     formatted = self._shorten(formatted, 300)
 
                 elif mode == 'ocr':

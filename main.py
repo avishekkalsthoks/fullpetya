@@ -520,38 +520,23 @@ class SmartVision:
 
     def _get_search_query(self):
         """
-        Get search query from user via voice input.
+        Get search query for search mode.
         
-        For now, this is a placeholder - in production, you would:
-        1. Use speech recognition (e.g., Vosk) to listen for the query
-        2. Parse the query
-        3. Return the search term
+        Now directly searches for VI-priority items without voice input.
+        Returns 'auto' to scan for common items helpful for visually impaired users.
         
         Returns:
-            Search query string or None if cancelled
+            Search query string (defaults to 'auto' for VI-priority scan)
         """
-        # Announce and switch to chat mode for microphone access
-        self.audio.say("Listening. What should I search for?")
-        self.audio.switch_bluetooth_profile('chat')
-
-        query = None
-        try:
-            if self.speech:
-                query = self.speech.listen()
-        finally:
-            # Switch back to music mode to save RAM and restore quality
-            self.audio.switch_bluetooth_profile('music')
-
-        if not query:
-            query = SEARCH_DEFAULT_QUERY
-            if query.strip().lower() in ("auto", ""):
-                self.audio.say("Scanning for common items.")
-            else:
-                self.audio.say(f"I didn't catch that. Searching for {query}.")
+        # Directly search for VI-priority items without voice input
+        query = SEARCH_DEFAULT_QUERY
+        
+        if query.strip().lower() in ("auto", ""):
+            self.audio.say("Scanning for important items.")
         else:
             self.audio.say(f"Searching for {query}.")
 
-        print(f"🎤 Heard: {query}")
+        print(f"🔍 Search query: {query}")
         return query
 
     def _save_capture(self, image_bytes, mode):
