@@ -44,27 +44,14 @@ TESSERACT_CMD = os.getenv('TESSERACT_CMD', '').strip()
 OCR_TIMEOUT = int(os.getenv('OCR_TIMEOUT', '8'))
 
 # ===============================================
-# Face Recognition Configuration
+# Face Recognition Configuration (Cloud Only)
 # ===============================================
 
-FACE_DB_DIR = os.getenv('FACE_DB_DIR', 'faces')
-FACE_CONFIDENCE_THRESHOLD = int(os.getenv('FACE_CONFIDENCE_THRESHOLD', '80'))
-
-# Cloud Face Recognition API (for online mode - better accuracy)
+# Cloud Face Recognition API
 # Set this to your cloud API endpoint (e.g., GitHub Codespaces URL)
+# Face processing happens in the cloud - lightweight for Pi Zero 2W
 FACE_API_URL = os.getenv('FACE_API_URL', '').strip()
 FACE_API_TIMEOUT = int(os.getenv('FACE_API_TIMEOUT', '15'))
-
-# Face detector (DNN preferred)
-FACE_DNN_PROTO = os.getenv(
-    'FACE_DNN_PROTO',
-    os.path.join(LOCAL_MODEL_DIR, 'face_detector_deploy.prototxt')
-)
-FACE_DNN_MODEL = os.getenv(
-    'FACE_DNN_MODEL',
-    os.path.join(LOCAL_MODEL_DIR, 'face_detector.caffemodel')
-)
-FACE_DNN_CONFIDENCE = float(os.getenv('FACE_DNN_CONFIDENCE', '0.5'))
 
 # ===============================================
 # Performance Tuning for Pi Zero 2W

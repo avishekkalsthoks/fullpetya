@@ -19,7 +19,7 @@ An assistive vision device optimized for Raspberry Pi Zero 2W (512MB RAM) with *
 |------|--------|------------------|
 | Describe | Full scene description (Gemini AI) | Object summary + positions + distance hints |
 | OCR | Azure Vision OCR | Tesseract OCR |
-| Face | Cloud API (deep learning) | Local LBPH recognition |
+| Face | Cloud API (deep learning) | *Cloud only - lightweight for Pi* |
 | Search | AI object search | MobileNet-SSD object detection |
 
 Set `LOCAL_VISION_ONLY=true` in `.env` to **force offline-only** mode.
@@ -209,15 +209,12 @@ The systemd service can run this automatically on boot.
 
 ---
 
-## Face Recognition (Online + Offline)
+## Face Recognition (Cloud Only)
 
-Face recognition now supports **two modes**:
+Face recognition uses a **cloud API** hosted on GitHub Codespaces. This keeps the Raspberry Pi lightweight - it just captures and sends images to the cloud for processing.
 
-### Online Mode (Cloud API - Better Accuracy)
+### Setup
 
-Uses deep learning models hosted on GitHub Codespaces for superior recognition accuracy.
-
-**Setup:**
 1. Create a GitHub Codespaces with the face recognition API
 2. Make port 5000 **PUBLIC** in the Codespaces settings
 3. Add to your `.env`:
@@ -225,36 +222,27 @@ Uses deep learning models hosted on GitHub Codespaces for superior recognition a
    FACE_API_URL=https://your-codespace-name-5000.app.github.dev
    ```
 
-**How it works:**
-- Images are sent to the cloud API for processing
-- Deep learning models analyze faces
-- Results include name, confidence, age, and gender estimates
-- Falls back to offline mode if cloud is unavailable
+### How It Works
 
-### Offline Mode (Local LBPH)
+- Pi captures image → Sends to cloud API
+- Cloud uses deep learning models to analyze faces
+- Results include name and confidence
+- Very lightweight on the Pi (no local processing)
 
-Uses OpenCV's LBPH algorithm for local recognition without internet.
+### Registering Faces
 
-**Face Enrollment (Offline):**
-```bash
-source venv/bin/activate
-python3 enroll_face.py "Alice" --photos 5
+Use the Codespaces web interface or client script to register faces:
 ```
-
-Faces are stored in:
-```
-faces/<name>/img1.jpg
-faces/<name>/img2.jpg
+register <name>    # Quick registration (1 photo)
+train <name>       # Better accuracy (5 photos with different angles)
 ```
 
 ### Best Practices for Accuracy
 
-For best recognition (especially with cloud API):
 - **Capture 5-10 images** per person with different angles
 - **Vary lighting**: bright, normal, dim
 - **Face angles**: front, left profile, right profile
 - **Face should fill 40-60%** of the frame
-- Avoid sunglasses (unless you want to recognize with them)
 
 ---
 
