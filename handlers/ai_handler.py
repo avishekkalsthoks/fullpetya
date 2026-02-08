@@ -20,26 +20,34 @@ from config import (
 
 # System prompt for OpenRouter scene description (blind assistance)
 SCENE_DESCRIPTION_PROMPT = """You are an assistive AI helping a blind person understand their surroundings and walk safely.
-Your goal is to provide a concise but rich description of the scene.
 
-1. Start by identifying the environment (e.g., "You are in a living room", "You are on a busy street").
+First, identify the environment:
+- Say if the person is in a room, road, street, corridor, shop, or outdoor area.
 
-2. Describe the most important elements for safety and navigation:
-   - Obstacles (furniture, walls, poles, uneven ground)
-   - People and their relative positions
-   - Doors, stairs, or exits
-   - Moving vehicles (if outdoors)
+Then describe ONLY important things:
+- Obstacles
+- People
+- Doors
+- Stairs
+- Vehicles
+- Safe walking path
 
-3. For each key object, always mention:
-   - Direction (ahead, to your left, to your right)
-   - Distance (Very close - under 1m, Close - 1-2m, Farther away - 3m+)
+For each important object:
+- Mention what it is
+- Mention direction (ahead, left, right)
+- Estimate distance using:
+  - Very close (under 1 meter)
+  - About 1 meter
+  - About 2-3 meters
+  - Far
 
-4. Formatting Rules:
-   - Use natural, friendly language.
-   - Keep it to 3-4 sentences maximum.
-   - Prioritize safety: mention the closest obstacle first.
-   - Do NOT say "it looks like" or "I see" - just state what is there.
-   - Avoid small details like colors or text unless they are critical for identifying the room.
+Rules:
+- Start with: "You are in a ..."
+- Mention the most important or dangerous object first
+- Keep response short and practical
+- Maximum 2-3 sentences
+- Ignore colors and unimportant details
+- Focus on safety and navigation
 """
 
 
@@ -380,11 +388,76 @@ class AzureAIHandler:
             raise AzureAPIError("OpenRouter returned no response choices.", retryable=True)
 
         message = choices[0].get("message", {})
-        text = message.get("content", "").strip()
+        
+        # Try to get content first, then fall back to reasoning field
+        text = message.get("content", "") or ""
+        text = text.strip()
+        
+        # If content is empty, check for reasoning (some models return text there)
+        if not text:
+            reasoning = message.get("reasoning", "") or ""
+            reasoning = reasoning.strip()
+            
+            if reasoning:
+                print(f"📝 Content empty, extracting from reasoning field...")
+                
+                # Try to find the actual scene description in the reasoning
+                # Look for sentences that match our expected output format
+                import re
+                
+                # Pattern 1: Find "You are in..." sentences
+                you_are_matches = re.findall(r'(?:^|\. |"|\'|\n)(You are (?:in|on|at|near)[^.!?]+[.!?])', reasoning, re.IGNORECASE)
+                
+                if you_are_matches:
+                    # Get the first "You are in..." and following sentences
+                    start_idx = reasoning.lower().find(you_are_matches[0].lower())
+                    if start_idx >= 0:
+                        remaining = reasoning[start_idx:]
+                        # Take up to 3 sentences
+                        sentences = re.split(r'(?<=[.!?])\s+', remaining)
+                        text = ' '.join(sentences[:3]).strip()
+                
+                # Pattern 2: Look for quoted final response
+                if not text:
+                    quoted = re.findall(r'"([^"]{20,200})"', reasoning)
+                    for q in quoted:
+                        if 'you are in' in q.lower() or 'you are on' in q.lower():
+                            text = q.strip()
+                            break
+                
+                # Pattern 3: Take the last paragraph if it looks like a description
+                if not text:
+                    paragraphs = [p.strip() for p in reasoning.split('\n\n') if p.strip()]
+                    for para in reversed(paragraphs):
+                        # Check if paragraph looks like a scene description
+                        if ('you are' in para.lower() or 
+                            'ahead' in para.lower() or 
+                            'left' in para.lower() or 
+                            'right' in para.lower()):
+                            # Take first 2-3 sentences
+                            sentences = re.split(r'(?<=[.!?])\s+', para)
+                            text = ' '.join(sentences[:3]).strip()
+                            break
+                
+                # Fallback: just take something reasonable from the reasoning
+                if not text and len(reasoning) > 50:
+                    # Take the last meaningful chunk, limited to reasonable TTS length
+                    lines = [l.strip() for l in reasoning.split('\n') if l.strip()]
+                    for line in reversed(lines):
+                        if len(line) > 30 and len(line) < 300:
+                            text = line
+                            break
+                    if not text:
+                        text = reasoning[:250] + "..."
+                
+                print(f"📝 Extracted from reasoning: {text[:80]}...")
         
         if not text:
             print(f"⚠️  OpenRouter returned empty text. Message: {message}")
             raise AzureAPIError("OpenRouter returned empty text.", retryable=True)
+        
+        # Clean up the text - remove quotes if present
+        text = text.strip('"').strip("'")
 
         # Check if the response indicates it couldn't process the image
         failure_phrases = [
