@@ -229,12 +229,19 @@ Face recognition uses a **cloud API** hosted on GitHub Codespaces. This keeps th
 - Results include name and confidence
 - Very lightweight on the Pi (no local processing)
 
-### Registering Faces
+### Registering Faces (from Pi)
 
-Use the Codespaces web interface or client script to register faces:
-```
-register <name>    # Quick registration (1 photo)
-train <name>       # Better accuracy (5 photos with different angles)
+Use the included enrollment script to register faces directly from your Pi camera:
+
+```bash
+# Activate environment
+source venv/bin/activate
+
+# Quick registration (1 photo)
+python3 enroll_face_online.py "Alice"
+
+# Training mode (5 photos - recommended)
+python3 enroll_face_online.py "Alice" --train
 ```
 
 ### Best Practices for Accuracy
