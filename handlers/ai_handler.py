@@ -380,18 +380,41 @@ class AzureAIHandler:
         candidates = result.get("candidates", [])
         if not candidates:
             print(f"⚠️  Gemini returned no candidates. Full response: {result}")
-            return "I couldn't analyze the scene. Please try again."
+            raise AzureAPIError("Gemini returned no response candidates.", retryable=True)
 
         content = candidates[0].get("content", {})
         parts = content.get("parts", [])
         if not parts:
             print(f"⚠️  Gemini returned empty parts. Content: {content}")
-            return "I couldn't understand what I'm seeing. Please try again."
+            raise AzureAPIError("Gemini returned empty content.", retryable=True)
 
         text = parts[0].get("text", "").strip()
         if not text:
             print(f"⚠️  Gemini returned empty text. Parts: {parts}")
-            return "I couldn't understand what I'm seeing. Please try again."
+            raise AzureAPIError("Gemini returned empty text.", retryable=True)
+
+        # Check if Gemini's response indicates it couldn't process the image
+        failure_phrases = [
+            "i can't process",
+            "i cannot process",
+            "unable to process",
+            "can't analyze",
+            "cannot analyze",
+            "unable to analyze",
+            "i'm sorry, but i",
+            "i'm unable to",
+            "cannot identify",
+            "can't identify",
+            "i cannot see",
+            "i can't see the image",
+            "image is not clear",
+            "image is too",
+        ]
+        text_lower = text.lower()
+        for phrase in failure_phrases:
+            if phrase in text_lower:
+                print(f"⚠️  Gemini indicated failure: {text[:100]}")
+                raise AzureAPIError(f"Gemini couldn't process: {text[:50]}", retryable=False)
 
         print(f"✓ Gemini response: {text[:100]}...")
         return text
