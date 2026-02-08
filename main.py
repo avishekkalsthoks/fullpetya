@@ -465,6 +465,7 @@ class SmartVision:
                 if success:
                     if analysis_id is not None and self._analysis_cancel[analysis_id].is_set():
                         return
+                    print(f"✓ {mode.upper()} result: {result}")
                     self.audio.say(result)
                     return
                 print("⚠️  Online analysis failed, falling back to offline.")
@@ -501,6 +502,7 @@ class SmartVision:
 
         if analysis_id is not None and self._analysis_cancel[analysis_id].is_set():
             return
+        print(f"✓ {mode.upper()} (offline) result: {result}")
         self.audio.say(result)
 
     def _get_search_query(self):

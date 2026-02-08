@@ -369,6 +369,9 @@ class AzureAIHandler:
             json=payload,
             timeout=(timeout, timeout)
         )
+        
+        print(f"📡 Gemini API status: {response.status_code}")
+        
         self._raise_for_status(response, is_openai=True)
 
         result = response.json()
@@ -376,17 +379,21 @@ class AzureAIHandler:
         # Extract the response from Gemini format
         candidates = result.get("candidates", [])
         if not candidates:
+            print(f"⚠️  Gemini returned no candidates. Full response: {result}")
             return "I couldn't analyze the scene. Please try again."
 
         content = candidates[0].get("content", {})
         parts = content.get("parts", [])
         if not parts:
+            print(f"⚠️  Gemini returned empty parts. Content: {content}")
             return "I couldn't understand what I'm seeing. Please try again."
 
         text = parts[0].get("text", "").strip()
         if not text:
+            print(f"⚠️  Gemini returned empty text. Parts: {parts}")
             return "I couldn't understand what I'm seeing. Please try again."
 
+        print(f"✓ Gemini response: {text[:100]}...")
         return text
 
     def _analyze_objects(self, image_bytes, timeout_seconds=None):
