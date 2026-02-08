@@ -102,7 +102,33 @@ python3 main.py
 
 ## Search Mode Behavior
 
-If speech input is not available, Search mode will **scan for common items** and tell you where one is found.
+Search mode is optimized for visually impaired users. When used without a specific query, it automatically scans for **VI-priority items** - common items that blind users frequently need to locate.
+
+### VI-Priority Items
+
+Items are categorized by importance:
+
+| Priority | Items |
+|----------|-------|
+| **High** | doors, stairs, curbs, phone, wallet, keys, glasses, cane, medication, people, pets |
+| **Medium** | remote, charger, cup, bottle, plate, chair, table, bed, sofa |
+| **Low** | laptop, bag, umbrella, book, watch, tv |
+
+### Output Format
+
+Detected items are grouped by position with distance estimates:
+
+```
+"In front of you: chair, close about 2 arm lengths. To your left: bottle, very close about 1 arm length."
+```
+
+Distance estimates use arm lengths for intuitive understanding:
+- **Very close**: ~1 arm length (2-3 feet)
+- **Close**: ~2 arm lengths (4-6 feet)  
+- **Farther**: 3+ arm lengths (7+ feet)
+
+### Configuration
+
 The default behavior is controlled by:
 ```
 SEARCH_DEFAULT_QUERY=auto
@@ -112,8 +138,6 @@ You can set a specific default item instead:
 ```
 SEARCH_DEFAULT_QUERY=bottle
 ```
-
-Common items list (online): phone, wallet, keys, glasses, bottle, bag, backpack, book, remote, laptop, chair, table, sofa, tv.
 
 ---
 

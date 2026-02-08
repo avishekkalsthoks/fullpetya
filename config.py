@@ -148,6 +148,46 @@ SEARCH_OBJECTS = [
 ]
 
 # ===============================================
+# VI-Priority Items (for Visually Impaired Users)
+# ===============================================
+# These items are automatically scanned and reported with position/distance
+# when Search mode is used without a specific query
+
+VI_PRIORITY_ITEMS = {
+    # HIGH: Safety-critical and essential personal items
+    "high": [
+        # Navigation/Safety hazards
+        "door", "stairs", "staircase", "steps", "step", "curb", "edge",
+        "pole", "post", "obstacle", "wall", "window", "glass",
+        # Personal essentials
+        "phone", "cell phone", "mobile phone", "wallet", "keys", "key",
+        "glasses", "eyeglasses", "sunglasses", "cane", "walking stick",
+        "medication", "medicine", "pill bottle",
+        # People and pets (for social awareness)
+        "person", "people", "man", "woman", "child", "dog", "cat"
+    ],
+    # MEDIUM: Common household items needed frequently
+    "medium": [
+        "remote", "remote control", "charger", "cable", "cord",
+        "cup", "mug", "glass", "bottle", "water bottle",
+        "plate", "bowl", "spoon", "fork", "knife",
+        "chair", "table", "desk", "bed", "sofa", "couch", "bench"
+    ],
+    # LOW: Less urgent but still useful
+    "low": [
+        "laptop", "computer", "keyboard", "mouse",
+        "bag", "backpack", "purse", "handbag",
+        "umbrella", "book", "pen", "pencil",
+        "watch", "clock", "tv", "television"
+    ]
+}
+
+# Flattened set for quick lookup
+VI_PRIORITY_ALL = set()
+for items in VI_PRIORITY_ITEMS.values():
+    VI_PRIORITY_ALL.update(item.lower() for item in items)
+
+# ===============================================
 # GPS Navigation + Help Configuration
 # ===============================================
 

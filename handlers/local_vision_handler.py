@@ -254,25 +254,68 @@ class LocalVisionHandler:
         return f"No, I don't see {query_norm} right now."
 
     def search_frequent_items(self, image_bytes: bytes) -> str:
-        """Scan for common needed items and report one if found."""
+        """Scan for VI-priority items and report them by position."""
         detections = self.detect_objects(image_bytes, top_k=10)
         if not detections:
             return "I couldn't identify objects offline. Try better lighting or go online."
 
-        # Filter to frequent labels only
+        # Filter to frequent labels only (exclude person for item search)
         matches = [d for d in detections if d["label"] in self.OFFLINE_FREQUENT_LABELS and d["label"] != "person"]
         if not matches:
             return "I don't see any common items right now."
 
-        d = matches[0]
-        label = d["label"]
-        pretty = {
+        # Pretty names for display
+        pretty_names = {
             "tvmonitor": "tv",
             "diningtable": "table",
             "motorbike": "motorbike",
             "pottedplant": "plant"
-        }.get(label, label)
-        return f"I see a {pretty} in the {d['position']}, {d['distance']}."
+        }
+
+        # Group by position
+        left_items = []
+        center_items = []
+        right_items = []
+
+        seen = set()
+        for d in matches:
+            label = d["label"]
+            if label in seen:
+                continue
+            seen.add(label)
+
+            pretty = pretty_names.get(label, label)
+            pos = d["position"]
+            dist = d["distance"]
+            item_desc = f"{pretty}, {dist}"
+
+            if "left" in pos:
+                left_items.append(item_desc)
+            elif "right" in pos:
+                right_items.append(item_desc)
+            else:
+                center_items.append(item_desc)
+
+            # Limit to 5 items
+            if len(seen) >= 5:
+                break
+
+        # Build natural response
+        parts = []
+        if center_items:
+            items_text = ", ".join(center_items[:2])
+            parts.append(f"In front of you: {items_text}")
+        if left_items:
+            items_text = ", ".join(left_items[:2])
+            parts.append(f"To your left: {items_text}")
+        if right_items:
+            items_text = ", ".join(right_items[:2])
+            parts.append(f"To your right: {items_text}")
+
+        if not parts:
+            return "I don't see any common items right now."
+
+        return ". ".join(parts) + "."
 
     def ocr_text(self, image_bytes: bytes) -> str:
         """Offline OCR using Tesseract."""

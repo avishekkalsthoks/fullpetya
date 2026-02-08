@@ -14,7 +14,8 @@ from config import (
     AZURE_VISION_ENDPOINT, AZURE_VISION_KEY,
     GEMINI_API_KEY, GEMINI_API_URL,
     REQUEST_TIMEOUT, IMAGE_MAX_WIDTH, IMAGE_JPEG_QUALITY, SEARCH_OBJECTS,
-    ENABLE_PREPROCESSING, RETRY_ATTEMPTS, RETRY_DELAY
+    ENABLE_PREPROCESSING, RETRY_ATTEMPTS, RETRY_DELAY,
+    VI_PRIORITY_ITEMS, VI_PRIORITY_ALL
 )
 
 # System prompt for Azure OpenAI scene description (blind assistance)
@@ -528,8 +529,37 @@ class AzureAIHandler:
         joined = self._shorten(joined, 250)
         return f"I can read: {joined}"
 
+    def _distance_label(self, rect, image_area):
+        """Calculate distance estimate based on object size in image."""
+        if not rect or not image_area:
+            return None
+        try:
+            w = float(rect.get("w", 0))
+            h = float(rect.get("h", 0))
+        except Exception:
+            return None
+        if w <= 0 or h <= 0:
+            return None
+        ratio = (w * h) / image_area
+        if ratio >= 0.20:
+            return "very close, about 1 arm length"
+        if ratio >= 0.07:
+            return "close, about 2 arm lengths"
+        return "farther away, 3 or more arm lengths"
+
+    def _get_priority(self, name_lower):
+        """Get priority level for an item (0=high, 1=medium, 2=low, 3=none)."""
+        for priority, (level, items) in enumerate(VI_PRIORITY_ITEMS.items()):
+            if name_lower in [item.lower() for item in items]:
+                return priority
+        return 3  # Not a priority item
+
     def _format_search(self, objects, width, height=None, query=None):
+        """Format search results with VI-priority item detection."""
         parsed = self._parse_objects(objects)
+        image_area = (width * height) if width and height else None
+
+        # If user specified a query, search for that specific item
         if query:
             q = query.strip().lower()
             if not q:
@@ -542,28 +572,81 @@ class AzureAIHandler:
                     break
             if match:
                 pos = self._position_label(match["rect"], width)
-                if pos:
-                    return f"Yes, I see {match['name']} on the {pos}."
+                dist = self._distance_label(match["rect"], image_area)
+                if pos and dist:
+                    pos_text = "in front of you" if pos == "center" else f"to your {pos}"
+                    return f"Yes, I found {match['name']} {pos_text}, {dist}."
+                elif pos:
+                    pos_text = "in front of you" if pos == "center" else f"to your {pos}"
+                    return f"Yes, I found {match['name']} {pos_text}."
                 return f"Yes, I see {match['name']}."
             return f"No, I don't see {query}."
 
-        interpreted = interpret_azure_objects(objects, width, height)
-        if interpreted:
-            return interpreted
+        # No query - scan for VI-priority items
+        if not parsed:
+            return "I don't see any recognizable items."
 
-        common = {item.lower() for item in SEARCH_OBJECTS}
-        filtered = [obj for obj in parsed if obj["name_lower"] in common]
-        if not filtered:
+        # Filter to VI-priority items and sort by priority
+        vi_items = []
+        for obj in parsed:
+            priority = self._get_priority(obj["name_lower"])
+            if priority < 3:  # Is a priority item
+                vi_items.append((priority, obj))
+
+        if not vi_items:
+            # Fall back to general object interpretation
+            interpreted = interpret_azure_objects(objects, width, height)
+            if interpreted:
+                return interpreted
+            return "I don't see common items that visually impaired users typically need."
+
+        # Sort by priority (high first), then by confidence
+        vi_items.sort(key=lambda x: (x[0], -x[1]["confidence"]))
+
+        # Build response grouped by position
+        left_items = []
+        center_items = []
+        right_items = []
+
+        seen = set()
+        for priority, obj in vi_items:
+            if obj["name_lower"] in seen:
+                continue
+            seen.add(obj["name_lower"])
+
+            pos = self._position_label(obj["rect"], width)
+            dist = self._distance_label(obj["rect"], image_area)
+            item_desc = obj["name"]
+            if dist:
+                item_desc = f"{obj['name']}, {dist}"
+
+            if pos == "left":
+                left_items.append(item_desc)
+            elif pos == "right":
+                right_items.append(item_desc)
+            else:
+                center_items.append(item_desc)
+
+            # Limit to 5 items total for clarity
+            if len(seen) >= 5:
+                break
+
+        # Build natural response
+        parts = []
+        if center_items:
+            items_text = ", ".join(center_items[:2])
+            parts.append(f"In front of you: {items_text}")
+        if left_items:
+            items_text = ", ".join(left_items[:2])
+            parts.append(f"To your left: {items_text}")
+        if right_items:
+            items_text = ", ".join(right_items[:2])
+            parts.append(f"To your right: {items_text}")
+
+        if not parts:
             return "I don't see common items."
 
-        parts = []
-        for obj in filtered[:5]:
-            pos = self._position_label(obj["rect"], width)
-            if pos:
-                parts.append(f"{obj['name']} ({pos})")
-            else:
-                parts.append(obj["name"])
-        return f"I can see: {', '.join(parts)}."
+        return ". ".join(parts) + "."
 
     def analyze_image(self, image_bytes, mode='describe', query=None, progress_callback=None, return_status=False):
         """
